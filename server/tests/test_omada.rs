@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use pdm_api_types::omada::{
-    OmadaApiClient, OmadaClient, OmadaDevice, OmadaPort, OmadaVlan,
-};
+use pdm_api_types::omada::{OmadaApiClient, OmadaClient, OmadaDevice, OmadaPort, OmadaVlan};
 use server::context::ContextFactory;
 
 pub mod common;
@@ -16,17 +14,11 @@ struct OmadaTestClient;
 
 #[async_trait::async_trait]
 impl OmadaApiClient for OmadaTestClient {
-    async fn vlans(
-        &self,
-        _site: Option<&str>,
-    ) -> Result<Vec<OmadaVlan>, anyhow::Error> {
+    async fn vlans(&self, _site: Option<&str>) -> Result<Vec<OmadaVlan>, anyhow::Error> {
         Ok(common::read_captured_response("tests/api_responses/omada/vlans.json").await?)
     }
 
-    async fn devices(
-        &self,
-        _site: Option<&str>,
-    ) -> Result<Vec<OmadaDevice>, anyhow::Error> {
+    async fn devices(&self, _site: Option<&str>) -> Result<Vec<OmadaDevice>, anyhow::Error> {
         Ok(common::read_captured_response("tests/api_responses/omada/devices.json").await?)
     }
 
@@ -40,17 +32,12 @@ impl OmadaApiClient for OmadaTestClient {
         }
 
         Ok(
-            common::read_captured_response(&format!(
-                "tests/api_responses/omada/switch_{mac}.json"
-            ))
-            .await?,
+            common::read_captured_response(&format!("tests/api_responses/omada/switch_{mac}.json"))
+                .await?,
         )
     }
 
-    async fn clients(
-        &self,
-        _site: Option<&str>,
-    ) -> Result<Vec<OmadaClient>, anyhow::Error> {
+    async fn clients(&self, _site: Option<&str>) -> Result<Vec<OmadaClient>, anyhow::Error> {
         Ok(common::read_captured_response("tests/api_responses/omada/clients.json").await?)
     }
 }
@@ -116,7 +103,10 @@ async fn test_devices_attaches_port_list_and_collects_warnings() {
         .iter()
         .find(|d| d.device_type.as_deref() == Some("gateway"))
         .unwrap();
-    assert!(gateway.port_list.is_none(), "non-switches get no port fan-out");
+    assert!(
+        gateway.port_list.is_none(),
+        "non-switches get no port fan-out"
+    );
 }
 
 #[tokio::test]
@@ -160,8 +150,7 @@ async fn test_config_endpoints() {
     clean_config_files();
 
     // Unconfigured: all fields null, no secret.
-    let view: serde_json::Value =
-        server::api::omada::get_config(&mut common::rpcenv()).unwrap();
+    let view: serde_json::Value = server::api::omada::get_config(&mut common::rpcenv()).unwrap();
     assert!(view["url"].is_null());
     assert_eq!(view["secret_set"], false);
     assert!(view["digest"].is_null());
@@ -177,8 +166,7 @@ async fn test_config_endpoints() {
     );
     assert_eq!(stored.unwrap(), true);
 
-    let view: serde_json::Value =
-        server::api::omada::get_config(&mut common::rpcenv()).unwrap();
+    let view: serde_json::Value = server::api::omada::get_config(&mut common::rpcenv()).unwrap();
     assert_eq!(view["url"], "https://172.31.12.45:8043");
     assert_eq!(view["omadac_id"], "OM-1234");
     assert_eq!(view["client_id"], "app-id");

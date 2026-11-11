@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Error};
 use pdm_api_types::omada::{
-    OmadaApiClient, OmadaClient, OmadaClientEntry, OmadaConfigPut, OmadaConfigView,
-    OmadaDevice, OmadaDevicesView, OmadaVlan,
+    OmadaApiClient, OmadaClient, OmadaClientEntry, OmadaConfigPut, OmadaConfigView, OmadaDevice,
+    OmadaDevicesView, OmadaVlan,
 };
 use pdm_api_types::{PRIV_SYS_AUDIT, PRIV_SYS_MODIFY};
 use pdm_config::omada::OmadaRemote;
@@ -142,12 +142,11 @@ pub async fn list_devices(
     let upstream_client = std::sync::Arc::clone(&client);
     let upstream_site = site.clone();
 
-    let mut devices: Vec<OmadaDevice> =
-        memo_get(&format!("devices:{site}"), async move {
-            upstream_client.devices(Some(&upstream_site)).await
-        })
-        .await
-        .with_context(|| format!("failed to list Omada devices for site '{site}'"))?;
+    let mut devices: Vec<OmadaDevice> = memo_get(&format!("devices:{site}"), async move {
+        upstream_client.devices(Some(&upstream_site)).await
+    })
+    .await
+    .with_context(|| format!("failed to list Omada devices for site '{site}'"))?;
 
     let mut warnings = Vec::new();
 
@@ -195,19 +194,15 @@ pub async fn list_clients(
     let client = omada_client(&app)?;
     let upstream_site = site.clone();
 
-    let clients: Vec<OmadaClient> =
-        memo_get(&format!("clients:{site}"), async move {
-            client.clients(Some(&upstream_site)).await
-        })
-        .await
-        .with_context(|| format!("failed to list Omada clients for site '{site}'"))?;
+    let clients: Vec<OmadaClient> = memo_get(&format!("clients:{site}"), async move {
+        client.clients(Some(&upstream_site)).await
+    })
+    .await
+    .with_context(|| format!("failed to list Omada clients for site '{site}'"))?;
 
     let mut entries: Vec<OmadaClientEntry> = clients
         .into_iter()
-        .map(|client| OmadaClientEntry {
-            client,
-            pve: None,
-        })
+        .map(|client| OmadaClientEntry { client, pve: None })
         .collect();
 
     annotate_entries(&mut entries, &app).await?;
@@ -249,10 +244,7 @@ async fn annotate_entries(
 ///
 /// The secret itself is never included; only `secret_set` tells the caller
 /// whether one is stored.
-fn config_view_from(
-    remote: Option<&OmadaRemote>,
-    digest: &ConfigDigest,
-) -> serde_json::Value {
+fn config_view_from(remote: Option<&OmadaRemote>, digest: &ConfigDigest) -> serde_json::Value {
     serde_json::json!({
         "url": remote.map(|r| r.url.clone()),
         "omadac_id": remote.and_then(|r| r.omadac_id.clone()),
@@ -286,9 +278,7 @@ fn merge_put(current: Option<&OmadaRemote>, put: &OmadaConfigPut) -> Result<Omad
     returns: { type: OmadaConfigView },
 )]
 /// Get the Omada controller configuration.
-pub fn get_config(
-    _rpcenv: &mut dyn RpcEnvironment,
-) -> Result<serde_json::Value, Error> {
+pub fn get_config(_rpcenv: &mut dyn RpcEnvironment) -> Result<serde_json::Value, Error> {
     let (remote, digest) = pdm_config::omada::read()?;
     Ok(config_view_from(remote.as_ref(), &digest))
 }

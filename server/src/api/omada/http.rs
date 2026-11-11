@@ -57,7 +57,8 @@ pub struct TransportFailure;
 /// an API-level error (e.g. an `Omada error -44116: ...` envelope error, which
 /// means a full body was received).
 pub fn is_transport_error(err: &Error) -> bool {
-    err.chain().any(|e| e.downcast_ref::<TransportFailure>().is_some())
+    err.chain()
+        .any(|e| e.downcast_ref::<TransportFailure>().is_some())
 }
 
 /// The real transport: a hyper client with an accept-any-certificate TLS
@@ -75,8 +76,7 @@ struct ProxmoxTransport {
 
 impl ProxmoxTransport {
     fn new() -> Result<Self, Error> {
-        let mut connector =
-            openssl::ssl::SslConnector::builder(openssl::ssl::SslMethod::tls())?;
+        let mut connector = openssl::ssl::SslConnector::builder(openssl::ssl::SslMethod::tls())?;
         connector.set_verify_callback(openssl::ssl::SslVerifyMode::PEER, |_valid, _details| true);
         Ok(Self {
             client: proxmox_http::client::Client::with_ssl_connector(
@@ -96,9 +96,7 @@ impl OmadaTransport for ProxmoxTransport {
         headers: &[(&str, &str)],
         body: Option<&str>,
     ) -> Result<String, Error> {
-        let mut builder = http::request::Request::builder()
-            .method(method)
-            .uri(url);
+        let mut builder = http::request::Request::builder().method(method).uri(url);
         for (name, value) in headers {
             builder = builder.header(*name, *value);
         }
@@ -191,13 +189,19 @@ impl OmadaHttpClient {
         if let Some(id) = self.omadac_id.lock().await.clone() {
             return Ok(id);
         }
-        let body = self.request_with_retry("GET", &format!("{}/api/info", self.base), &[], None).await?;
+        let body = self
+            .request_with_retry("GET", &format!("{}/api/info", self.base), &[], None)
+            .await?;
         let env: OmadaEnvelopeRaw = serde_json::from_str(&body)
             .map_err(|e| Error::msg(format!("parsing /api/info response failed: {e}")))?;
         check_error_code(env.error_code, env.msg.as_deref())?;
         let id = env
             .result
-            .and_then(|r| r.get("omadacId").and_then(|v| v.as_str()).map(str::to_string))
+            .and_then(|r| {
+                r.get("omadacId")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            })
             .ok_or_else(|| Error::msg("/api/info response has no result.omadacId"))?;
         *self.omadac_id.lock().await = Some(id.clone());
         Ok(id)
@@ -223,7 +227,10 @@ impl OmadaHttpClient {
         let resp = self
             .request_with_retry(
                 "POST",
-                &format!("{}/openapi/authorize/token?grant_type=client_credentials", self.base),
+                &format!(
+                    "{}/openapi/authorize/token?grant_type=client_credentials",
+                    self.base
+                ),
                 &[],
                 Some(&body),
             )
@@ -241,7 +248,10 @@ impl OmadaHttpClient {
             .get("accessToken")
             .and_then(|v| v.as_str())
             .ok_or_else(|| Error::msg("token response has no accessToken"))?;
-        let expires_in: u64 = inner.get("expiresIn").and_then(|v| v.as_u64()).unwrap_or(7200);
+        let expires_in: u64 = inner
+            .get("expiresIn")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(7200);
         let entry = TokenEntry {
             token: token.to_string(),
             expires_at: Instant::now() + Duration::from_secs(expires_in),
@@ -360,7 +370,10 @@ pub struct OmadaHttpClient {
 
 #[async_trait]
 impl OmadaApiClient for OmadaHttpClient {
-    async fn vlans(&self, site: Option<&str>) -> Result<Vec<pdm_api_types::omada::OmadaVlan>, Error> {
+    async fn vlans(
+        &self,
+        site: Option<&str>,
+    ) -> Result<Vec<pdm_api_types::omada::OmadaVlan>, Error> {
         let om = self.omadac_id().await?;
         let site = self.site_id(site).await?;
         let token = self.token().await?;
@@ -584,7 +597,11 @@ mod tests {
         let vlans = client.vlans(None).await.unwrap();
         assert_eq!(vlans.len(), 250);
         let urls = mock.urls.lock().await;
-        assert_eq!(urls.len(), 3, "expected exactly 3 page requests, got {urls:?}");
+        assert_eq!(
+            urls.len(),
+            3,
+            "expected exactly 3 page requests, got {urls:?}"
+        );
         assert!(urls[0].contains("page=1&pageSize=100"), "url0: {}", urls[0]);
         assert!(urls[1].contains("page=2"), "url1: {}", urls[1]);
         assert!(urls[2].contains("page=3"), "url2: {}", urls[2]);
@@ -600,11 +617,19 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_first_calls_authenticate_once() {
-        let (client, mock) = fresh_client(vec![AUTH_RESPONSE.to_string(), EMPTY_PAGE.to_string(), EMPTY_PAGE.to_string()]);
+        let (client, mock) = fresh_client(vec![
+            AUTH_RESPONSE.to_string(),
+            EMPTY_PAGE.to_string(),
+            EMPTY_PAGE.to_string(),
+        ]);
         let (a, b) = tokio::join!(client.vlans(None), client.vlans(None));
         assert!(a.is_ok(), "call a: {:?}", a.err());
         assert!(b.is_ok(), "call b: {:?}", b.err());
-        assert_eq!(*mock.auth_calls.lock().await, 1, "auth must happen exactly once");
+        assert_eq!(
+            *mock.auth_calls.lock().await,
+            1,
+            "auth must happen exactly once"
+        );
     }
 
     #[test]

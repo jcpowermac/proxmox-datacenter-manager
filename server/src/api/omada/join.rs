@@ -39,12 +39,14 @@ pub fn build_match_map(
     for remote in remotes {
         for node in &remote.nodes {
             let value = (remote.id.clone(), node.node_name.clone());
-            map.entry(node.hostname.clone()).or_insert_with(|| value.clone());
+            map.entry(node.hostname.clone())
+                .or_insert_with(|| value.clone());
             for ip in dns.get(&node.hostname).into_iter().flatten() {
                 map.entry(ip.clone()).or_insert_with(|| value.clone());
             }
             if let Some(node_name) = &node.node_name {
-                map.entry(node_name.clone()).or_insert_with(|| value.clone());
+                map.entry(node_name.clone())
+                    .or_insert_with(|| value.clone());
             }
         }
     }
@@ -117,9 +119,7 @@ pub fn remote_join_entries(remotes: &SectionConfigData<Remote>) -> Vec<RemoteJoi
 /// the caller.
 pub fn std_resolver(host: &str) -> Result<Vec<String>, anyhow::Error> {
     // Strip a port if present ("host:port" — good enough for our purposes).
-    let host = host
-        .rsplit_once(':')
-        .map_or(host, |(host, _port)| host);
+    let host = host.rsplit_once(':').map_or(host, |(host, _port)| host);
 
     if host.parse::<std::net::IpAddr>().is_ok() {
         return Ok(Vec::new());
@@ -180,12 +180,18 @@ mod tests {
     #[test]
     fn matches_ip_literal_host_and_node_name() {
         let map = build_match_map(&remotes(), &dns());
-        assert_eq!(map.get("172.31.12.97").map(|(r, _)| r.clone()), Some("pve-lab".into()));
+        assert_eq!(
+            map.get("172.31.12.97").map(|(r, _)| r.clone()),
+            Some("pve-lab".into())
+        );
         assert_eq!(
             map.get("pve").map(|(r, n)| (r.clone(), n.clone())),
             Some(("pve-lab".into(), Some("pve".into())))
         );
-        assert_eq!(map.get("172.31.12.99").map(|(r, _)| r.clone()), Some("pve-lab".into()));
+        assert_eq!(
+            map.get("172.31.12.99").map(|(r, _)| r.clone()),
+            Some("pve-lab".into())
+        );
     }
 
     #[test]
@@ -207,7 +213,10 @@ mod tests {
             },
         ];
         let map = build_match_map(&remotes, &HashMap::new());
-        assert_eq!(map.get("172.31.12.97").map(|(r, _)| r.clone()), Some("first".into()));
+        assert_eq!(
+            map.get("172.31.12.97").map(|(r, _)| r.clone()),
+            Some("first".into())
+        );
     }
 
     #[test]
@@ -222,8 +231,7 @@ mod tests {
         assert_eq!(entry.pve.as_ref().unwrap().node.as_deref(), Some("pve"));
 
         // No IP, host name matches a node name (case-insensitive).
-        let mut entry: OmadaClientEntry =
-            serde_json::from_str(r#"{"hostName":"  PVE "}"#).unwrap();
+        let mut entry: OmadaClientEntry = serde_json::from_str(r#"{"hostName":"  PVE "}"#).unwrap();
         annotate_client(&mut entry, &map);
         assert_eq!(entry.pve.as_ref().unwrap().remote, "pve-lab");
 

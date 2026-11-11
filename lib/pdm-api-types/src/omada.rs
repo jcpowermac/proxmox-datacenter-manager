@@ -24,7 +24,7 @@ pub trait OmadaApiClient: Send + Sync {
     async fn clients(&self, site: Option<&str>) -> Result<Vec<OmadaClient>, anyhow::Error>;
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OmadaSite {
     #[serde(default)]
@@ -33,7 +33,7 @@ pub struct OmadaSite {
     pub name: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OmadaVlan {
     #[serde(default)]
@@ -48,7 +48,7 @@ pub struct OmadaVlan {
     pub dhcp: Option<bool>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OmadaPort {
     #[serde(default)]
@@ -67,7 +67,7 @@ pub struct OmadaPort {
     pub status: Option<i32>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OmadaDevice {
     #[serde(default)]
@@ -89,7 +89,7 @@ pub struct OmadaDevice {
     pub port_list: Option<Vec<OmadaPort>>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OmadaClient {
     #[serde(default)]
@@ -124,7 +124,7 @@ pub struct OmadaClient {
 }
 
 /// PDM annotation: the client matches a PVE remote node.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct PveMatch {
     pub remote: String,
     pub node: Option<String>,
@@ -132,7 +132,7 @@ pub struct PveMatch {
 
 /// An Omada client plus the optional PVE-remote annotation (flat, not nested,
 /// so the UI can render it in one row).
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct OmadaClientEntry {
     #[serde(flatten)]
     pub client: OmadaClient,
@@ -140,13 +140,13 @@ pub struct OmadaClientEntry {
     pub pve: Option<PveMatch>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct OmadaDevicesView {
     pub devices: Vec<OmadaDevice>,
     pub warnings: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 /// The Omada controller configuration as seen by the API (the client secret
 /// is write-only; `secret_set` indicates whether one is stored).
 #[api]
@@ -163,7 +163,7 @@ pub struct OmadaConfigView {
     pub digest: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct OmadaConfigPut {
     pub url: String,
     pub omadac_id: Option<String>,

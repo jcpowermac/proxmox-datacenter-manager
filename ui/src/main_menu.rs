@@ -20,6 +20,7 @@ use crate::configuration::subscription_registry::SubscriptionRegistryProps;
 use crate::configuration::views::ViewGrid;
 use crate::dashboard::view::View;
 use crate::guests::GuestPanel;
+use crate::omada::OmadaView;
 use crate::remotes::RemotesPanel;
 use crate::sdn::ZoneTree;
 use crate::sdn::evpn::EvpnPanel;
@@ -359,6 +360,17 @@ impl Component for PdmMainMenu {
             Some("fa fa-ceph"),
             |_| CephView::new().into(),
         );
+
+        if self.acl_context.check_privs(&["system"], PRIV_SYS_AUDIT) {
+            register_view(
+                &mut menu,
+                &mut content,
+                tr!("Omada"),
+                "omada",
+                Some("fa fa-sitemap"),
+                |_| OmadaView::new().into(),
+            );
+        }
 
         register_view(
             &mut menu,

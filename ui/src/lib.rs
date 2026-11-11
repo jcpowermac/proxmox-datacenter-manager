@@ -49,6 +49,8 @@ mod widget;
 
 pub mod ceph;
 
+pub mod omada;
+
 pub mod pbs;
 pub mod pve;
 

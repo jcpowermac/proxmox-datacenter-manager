@@ -242,7 +242,9 @@ pub trait ClientFactory {
     fn make_pbs_client(&self, remote: &Remote) -> Result<Box<PbsClient>, Error>;
 
     /// Create a client for the configured Omada controller, if any.
-    fn make_omada_client(&self) -> Result<Option<std::sync::Arc<dyn pdm_api_types::omada::OmadaApiClient>>, Error> {
+    fn make_omada_client(
+        &self,
+    ) -> Result<Option<std::sync::Arc<dyn pdm_api_types::omada::OmadaApiClient>>, Error> {
         Ok(None)
     }
 
@@ -396,7 +398,9 @@ impl ClientFactory for DefaultClientFactory {
         Ok(Box::new(PbsClient(client)))
     }
 
-    fn make_omada_client(&self) -> Result<Option<std::sync::Arc<dyn pdm_api_types::omada::OmadaApiClient>>, Error> {
+    fn make_omada_client(
+        &self,
+    ) -> Result<Option<std::sync::Arc<dyn pdm_api_types::omada::OmadaApiClient>>, Error> {
         let (remote, _digest) = pdm_config::omada::read()?;
         let Some(remote) = remote else {
             return Ok(None);

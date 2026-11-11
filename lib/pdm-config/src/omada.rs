@@ -18,11 +18,11 @@
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::Error;
-use serde::{Deserialize, Serialize};
 use proxmox_config_digest::ConfigDigest;
 use proxmox_schema::{ApiStringFormat, EnumEntry, ObjectSchema, Schema, StringSchema};
 use proxmox_section_config::typed::{ApiSectionDataEntry, SectionConfigData};
 use proxmox_section_config::{SectionConfig, SectionConfigPlugin};
+use serde::{Deserialize, Serialize};
 
 use pdm_buildcfg::configdir;
 
@@ -57,14 +57,12 @@ const OMADA_PROPERTIES: ObjectSchema = ObjectSchema::new(
         (
             "omadac-id",
             true,
-            &StringSchema::new("The Omada controller ID (auto-resolved when absent).")
-                .schema(),
+            &StringSchema::new("The Omada controller ID (auto-resolved when absent).").schema(),
         ),
         (
             "url",
             false,
-            &StringSchema::new("The controller URL, e.g. https://172.31.12.45:8043.")
-                .schema(),
+            &StringSchema::new("The controller URL, e.g. https://172.31.12.45:8043.").schema(),
         ),
     ],
 );
@@ -119,10 +117,7 @@ impl ApiSectionDataEntry for OmadaRemote {
     }
 
     fn to_pair(&self) -> Result<(String, serde_json::Value), serde_json::Error> {
-        Ok((
-            OMADA_SECTION_ID.to_string(),
-            serde_json::to_value(self)?,
-        ))
+        Ok((OMADA_SECTION_ID.to_string(), serde_json::to_value(self)?))
     }
 }
 
@@ -156,10 +151,7 @@ impl ApiSectionDataEntry for OmadaShadow {
     }
 
     fn to_pair(&self) -> Result<(String, serde_json::Value), serde_json::Error> {
-        Ok((
-            OMADA_SECTION_ID.to_string(),
-            serde_json::to_value(self)?,
-        ))
+        Ok((OMADA_SECTION_ID.to_string(), serde_json::to_value(self)?))
     }
 }
 
@@ -210,11 +202,11 @@ pub fn render_cfg(remote: &OmadaRemote) -> Result<(String, Option<String>), Erro
     let shadow = match secret {
         Some(client_secret) => {
             let mut shadow_data = SectionConfigData::default();
-            shadow_data.insert(
-                OMADA_SECTION_ID.to_string(),
-                OmadaShadow { client_secret },
-            );
-            Some(OmadaShadow::write_section_config(OMADA_SHADOW_FILENAME, &shadow_data)?)
+            shadow_data.insert(OMADA_SECTION_ID.to_string(), OmadaShadow { client_secret });
+            Some(OmadaShadow::write_section_config(
+                OMADA_SHADOW_FILENAME,
+                &shadow_data,
+            )?)
         }
         None => None,
     };

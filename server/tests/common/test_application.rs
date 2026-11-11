@@ -282,9 +282,7 @@ impl ClientFactory for TestApplication {
         bail!("not implemented")
     }
 
-    fn make_omada_client(
-        &self,
-    ) -> Result<Option<Arc<dyn OmadaApiClient>>, Error> {
+    fn make_omada_client(&self) -> Result<Option<Arc<dyn OmadaApiClient>>, Error> {
         match self.omada_client_maker.as_ref() {
             Some(maker) => Ok(Some(maker())),
             None => Ok(None),
