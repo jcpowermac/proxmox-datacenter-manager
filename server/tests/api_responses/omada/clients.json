@@ -1,0 +1,49 @@
+[
+  {
+    "ip": "172.31.12.97",
+    "mac": "52-54-00-11-22-33",
+    "hostName": "pve",
+    "name": "pve",
+    "vid": 12,
+    "port": 17,
+    "switchMac": "28-87-BA-61-24-DE",
+    "switchName": "SG3428",
+    "connectType": 1,
+    "active": true,
+    "lastSeen": 1700000000
+  },
+  {
+    "ip": "172.31.12.98",
+    "mac": "52-54-00-44-55-66",
+    "hostName": "pve2",
+    "name": "pve2",
+    "vid": 12,
+    "port": 4,
+    "switchMac": "28-87-BA-61-24-DE",
+    "switchName": "SG3428",
+    "connectType": 1,
+    "active": true,
+    "lastSeen": 1700000001
+  },
+  {
+    "ip": "172.31.12.50",
+    "mac": "AA-AA-AA-BB-BB-01",
+    "hostName": "laptop",
+    "name": "laptop",
+    "vid": 12,
+    "apName": "WIFI-servers",
+    "connectType": 2,
+    "active": true,
+    "lastSeen": 1700000002
+  },
+  {
+    "ip": "172.31.12.60",
+    "mac": "CC-CC-CC-DD-DD-02",
+    "name": "gateway-port",
+    "vid": 12,
+    "port": 5,
+    "connectType": 1,
+    "active": true,
+    "lastSeen": 1700000003
+  }
+]

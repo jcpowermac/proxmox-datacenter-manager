@@ -12,10 +12,13 @@ use proxmox_product_config::{ProductConfig, ProductConfigParams, open_api_lockfi
 use proxmox_section_config::typed::{ApiSectionDataEntry, SectionConfigData};
 
 use pdm_api_types::ConfigDigest;
-use pdm_api_types::remotes::{Remote, RemoteType};
+use pdm_api_types::omada::OmadaApiClient;
+use pdm_api_types::remotes::{NodeUrl, Remote, RemoteType};
 use pdm_api_types::subscription::{SubscriptionKeyEntry, SubscriptionKeyShadow};
 use pdm_config::remotes::RemoteConfig;
 use pdm_config::subscriptions::SubscriptionKeyConfig;
+
+use proxmox_schema::property_string::PropertyString;
 
 use server::connection::{ClientFactory, PveClient};
 use server::context::ContextFactory;
@@ -47,6 +50,9 @@ impl TestRemoteState {
 pub struct PveTestRemote {
     pub name: String,
     pub nodes: u32,
+    /// Node host names (IP literals or DNS names) to register in the remote's
+    /// `nodes` list; used by tests that exercise remote-based joins.
+    pub node_hosts: Vec<String>,
     pub state: TestRemoteState,
 }
 
@@ -62,7 +68,16 @@ impl PveTestRemote {
         Remote {
             ty: RemoteType::Pve,
             id: self.name.clone(),
-            nodes: Vec::new(),
+            nodes: self
+                .node_hosts
+                .iter()
+                .map(|host| {
+                    PropertyString::new(NodeUrl {
+                        hostname: host.clone(),
+                        fingerprint: None,
+                    })
+                })
+                .collect(),
             authid: Authid::root_auth_id().clone(),
             token: "".into(),
             web_url: None,
@@ -78,6 +93,7 @@ impl PveTestRemote {
 #[derive(Clone)]
 pub struct TestApplication {
     pve_remotes: HashMap<String, PveTestRemoteWithClientMaker>,
+    omada_client_maker: Option<Arc<dyn Fn() -> Arc<dyn OmadaApiClient> + Send + Sync>>,
     base_dir: Arc<tempfile::TempDir>,
 }
 
@@ -97,8 +113,19 @@ impl TestApplication {
 
         Self {
             pve_remotes: HashMap::new(),
+            omada_client_maker: None,
             base_dir,
         }
+    }
+
+    /// Register a maker for the Omada client returned by
+    /// [`ClientFactory::make_omada_client`].
+    pub fn with_omada_client<F>(mut self, f: F) -> Self
+    where
+        F: Fn() -> Arc<dyn OmadaApiClient> + Send + Sync + 'static,
+    {
+        self.omada_client_maker = Some(Arc::new(f));
+        self
     }
 
     /// Register a PVE remote called `name`, using `f` to create its client implementation.
@@ -106,6 +133,23 @@ impl TestApplication {
     /// The client is constructed for every request, so any data that should outlive a single
     /// client has to be kept in `state`.
     pub fn with_pve_remote<S, C, F>(mut self, name: S, state: TestRemoteState, f: F) -> Self
+    where
+        S: Into<String>,
+        C: pve_api_types::client::PveClient + Send + Sync + 'static,
+        F: Fn(PveTestRemote) -> C + Send + Sync + 'static,
+    {
+        self.with_pve_remote_hosted(name, Vec::new(), state, f)
+    }
+
+    /// Like [`with_pve_remote`](Self::with_pve_remote), but also registers
+    /// `node_hosts` in the remote's `nodes` list (for remote-based joins).
+    pub fn with_pve_remote_hosted<S, C, F>(
+        mut self,
+        name: S,
+        node_hosts: Vec<String>,
+        state: TestRemoteState,
+        f: F,
+    ) -> Self
     where
         S: Into<String>,
         C: pve_api_types::client::PveClient + Send + Sync + 'static,
@@ -121,6 +165,7 @@ impl TestApplication {
                 remote: PveTestRemote {
                     name,
                     nodes: 1,
+                    node_hosts,
                     state,
                 },
             },
@@ -235,6 +280,15 @@ impl ClientFactory for TestApplication {
 
     fn make_pbs_client(&self, _remote: &Remote) -> Result<Box<PbsClient>, Error> {
         bail!("not implemented")
+    }
+
+    fn make_omada_client(
+        &self,
+    ) -> Result<Option<Arc<dyn OmadaApiClient>>, Error> {
+        match self.omada_client_maker.as_ref() {
+            Some(maker) => Ok(Some(maker())),
+            None => Ok(None),
+        }
     }
 
     fn make_raw_client(&self, _remote: &Remote) -> Result<Box<proxmox_client::Client>, Error> {

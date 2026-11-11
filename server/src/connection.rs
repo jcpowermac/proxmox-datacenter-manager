@@ -241,6 +241,11 @@ pub trait ClientFactory {
     /// Create a new API client for PBS remotes
     fn make_pbs_client(&self, remote: &Remote) -> Result<Box<PbsClient>, Error>;
 
+    /// Create a client for the configured Omada controller, if any.
+    fn make_omada_client(&self) -> Result<Option<std::sync::Arc<dyn pdm_api_types::omada::OmadaApiClient>>, Error> {
+        Ok(None)
+    }
+
     /// Create a new API client for PVE remotes, but with a specific endpoint.
     fn make_pve_client_with_endpoint(
         &self,
@@ -389,6 +394,17 @@ impl ClientFactory for DefaultClientFactory {
     fn make_pbs_client(&self, remote: &Remote) -> Result<Box<PbsClient>, Error> {
         let client = crate::connection::multi_connect(remote)?;
         Ok(Box::new(PbsClient(client)))
+    }
+
+    fn make_omada_client(&self) -> Result<Option<std::sync::Arc<dyn pdm_api_types::omada::OmadaApiClient>>, Error> {
+        let (remote, _digest) = pdm_config::omada::read()?;
+        let Some(remote) = remote else {
+            return Ok(None);
+        };
+
+        Ok(Some(std::sync::Arc::new(
+            crate::api::omada::http::OmadaHttpClient::new(&remote)?,
+        )))
     }
 
     fn make_pve_client_with_endpoint(

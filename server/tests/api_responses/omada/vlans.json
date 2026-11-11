@@ -1,0 +1,18 @@
+[
+  {
+    "id": "17",
+    "name": "servers",
+    "vlan": 12,
+    "vlanType": 0,
+    "gatewaySubnet": "172.31.12.0/24",
+    "dhcpSettingsVO": { "dhcp": true }
+  },
+  {
+    "id": "18",
+    "name": "iot",
+    "vlan": 1066,
+    "vlanType": 0,
+    "gatewaySubnet": "172.31.1066.0/24",
+    "dhcpSettingsVO": { "dhcp": false }
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "id": "1",
+    "type": "gateway",
+    "mac": "A4-2B-8C-DE-11-01",
+    "ip": "172.31.12.2",
+    "name": "ER7206",
+    "firmware": "1.5.4",
+    "status": 1
+  },
+  {
+    "id": "2",
+    "type": "switch",
+    "mac": "28-87-BA-61-24-DE",
+    "ip": "172.31.12.3",
+    "name": "SG3428",
+    "firmware": "1.7.0",
+    "status": 1
+  },
+  {
+    "id": "3",
+    "type": "switch",
+    "mac": "DE-AD-DE-AD-DE-AD",
+    "ip": "172.31.12.9",
+    "name": "DeadSwitch",
+    "firmware": "1.0.0",
+    "status": 3
+  }
+]

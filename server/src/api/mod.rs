@@ -34,6 +34,7 @@ const SUBDIRS: SubdirMap = &sorted!([
     ("remotes", &remotes::ROUTER),
     ("resources", &resources::ROUTER),
     ("nodes", &nodes::ROUTER),
+    ("omada", &omada::ROUTER),
     ("sdn", &sdn::ROUTER),
     ("subscriptions", &subscriptions::ROUTER),
     ("version", &Router::new().get(&API_METHOD_VERSION)),

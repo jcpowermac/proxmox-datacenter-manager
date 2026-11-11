@@ -1,0 +1,29 @@
+[
+  {
+    "port": 17,
+    "name": "Port 17",
+    "profileId": "p1",
+    "profileName": "servers",
+    "poeMode": "auto",
+    "lagPort": false,
+    "status": 1
+  },
+  {
+    "port": 4,
+    "name": "Port 4",
+    "profileId": "p1",
+    "profileName": "servers",
+    "poeMode": "auto",
+    "lagPort": false,
+    "status": 1
+  },
+  {
+    "port": 8,
+    "name": "Port 8",
+    "profileId": "p0",
+    "profileName": "default",
+    "poeMode": "auto",
+    "lagPort": false,
+    "status": 0
+  }
+]
