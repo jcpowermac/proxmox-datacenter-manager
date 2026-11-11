@@ -13,6 +13,7 @@ pub mod auto_installer;
 pub mod ceph;
 pub mod config;
 pub mod nodes;
+pub mod omada;
 pub mod pbs;
 pub mod pve;
 pub mod remotes;
