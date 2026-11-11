@@ -33,6 +33,7 @@ pub fn init() -> Result<PdmApplication, Error> {
     // must provide equivalent views: the default implementation is stateless, and the fake
     // implementation clones the same data.
     pdm_config::remotes::init(factory.make_remote_config()?);
+    pdm_config::omada::init();
 
     Ok(app)
 }
