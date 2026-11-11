@@ -1,0 +1,212 @@
+# Design: Omada network section in Proxmox Datacenter Manager (read-only phase 1)
+
+Date: 2026-11-11
+Status: draft, awaiting owner approval
+Fork: `jcpowermac/proxmox-datacenter-manager` @ upstream master `aec1088` (v1.1.9)
+
+## Intent and why
+
+The homelab runs three standalone Proxmox VE 9 nodes, centrally managed by PDM
+(LXC 103, `172.31.12.95:8443`), and its network (ER7206 gateway, SG3428 switch,
+three EAPs) is managed by a TP-Link Omada software controller v6.3.0.111
+(LXC, `172.31.12.45:8043`). Today that means two UIs for one estate.
+
+Goal: PDM becomes the single pane of glass. A new read-only "Omada" section in
+PDM shows:
+
+1. **VLANs** (Omada LAN networks: name, VLAN ID, subnet/gateway, DHCP, device counts)
+2. **Physical switch ports** — full port table of the SG3428, with which VLAN
+   profile each port carries and which client sits on it; the three PVE
+   management ports highlighted (verified live: `172.31.12.97`→port 17,
+   `172.31.12.98`→port 4, `172.31.12.99`→port 8, all VLAN 12 "servers")
+3. **IP management** — client table: IP, MAC, hostname, VLAN, switch port or
+   AP, online/offline, blocked; with PDM's PVE remotes annotated on the
+   matching clients (join on the node management IPs from `remotes.cfg`)
+
+Everything behind PDM's existing TLS + authentication: one login, no new
+public ports, no Omada credentials in the browser.
+
+## Goals
+
+- Read-only display phase; writes (block client, port reconfig, add VLAN) are
+  explicitly phase 2.
+- One Omada controller + one site (lab reality), but the API takes a site
+  parameter so a second site doesn't break anything.
+- Config stored in PDM's config dir with the secret in a shadow file,
+  editable through the PDM API (GET/PUT) and a small UI form.
+- Additive to upstream: new modules plus ~2-line registrations, so rebasing
+  future PDM releases stays cheap.
+
+## Non-goals (phase 1)
+
+- Write actions of any kind (except the PDM-side config PUT).
+- AP/Wi-Fi detail views, traffic counters/RRD history, alarms, cable test.
+- Omada objects appearing in the PDM resource tree, global search, or
+  dashboards/"views" (they stay in their own section).
+- A CLI surface (API is enough; the generic PDM client can hit it).
+- Multi-controller support.
+
+## Anti-goals
+
+- Do **not** add `RemoteType::Omada` — that enum is matched in ~25 places
+  (fetchers, task cache, updates, ceph) and would drag the onboarding wizard
+  into it.
+- Do **not** use Omada's internal UI protocol (`/{omadacId}/api/v2`); use the
+  documented OpenAPI v1 surface even though it has quirks (below).
+- Do **not** fetch Omada directly from the browser UI (credentials + CORS).
+
+## Constraints
+
+- Fork of PDM v1.1.9, AGPL-3. Rust 2021 workspace; UI is Yew 0.21 → WASM
+  (Trunk, `proxmox-wasm-builder`), Proxmox `pwt` widget toolkit.
+- Build = Proxmox deb pipeline; install custom `.deb` over stock in LXC 103.
+  This is the main one-time cost/schedule risk.
+- Omada controller uses self-signed TLS; the PDM server's HTTP client must
+  allow it the same way `server/src/connection.rs` does for PVE clients.
+- Single-user lab today (root@pam); keep the permission model simple.
+
+## Approaches considered
+
+- **A. New top-level API section + UI module (chosen).** `server/src/api/omada/`
+  proxy over Omada OpenAPI v1 + config section + `ui/src/omada/` Yew views.
+  Additive, small blast radius, sits behind PDM auth. Cost: one-off UI work.
+- **B. `RemoteType::Omada`.** Cleaner conceptually ("remote = managed
+  system") but touches every match arm, the onboarding wizard, task/update
+  machinery that assumes PVE/PBS shapes; Omada's single-site model fits
+  "remote + nodes" awkwardly. Defer until A proves out.
+- **C. Fake-PVE-remote shim.** Zero PDM source changes (sidecar that serves a
+  fake `/cluster/resources` encoding VLAN/port data). Cheapest start but
+  wrong semantics (VLANs as "guests"), awkward writes, and RRD/subscription
+  machinery chokes on non-PVE data. Kept only as a spike fallback.
+
+## Verified Omada OpenAPI v1 facts
+
+Probed against the live controller (v6.3.0.111) on 2026-11-11:
+
+- `GET /api/info` (no auth) → `result.omadacId`.
+- `POST /openapi/authorize/token?grant_type=client_credentials` body
+  `{omadacId, client_id, client_secret}` → `{accessToken, expiresIn: 7200}`.
+  Header for all calls: `Authorization: AccessToken=<token>`
+  (**not** `Bearer`; Bearer → 401 `-44116`).
+- List endpoints **require page params** or Tomcat returns a raw 400:
+  `?page=N&pageSize=M` (not `pageNo`).
+- Sites: `GET /openapi/v1/{om}/sites?page=1&pageSize=50`.
+- LAN networks (VLANs): `GET /openapi/v1/{om}/sites/{sid}/lan-networks?page=1&pageSize=100`
+  → fields incl. `id`, `name`, `vlan` (numeric VLAN ID), `dhcpSettingsVO`,
+  `gatewaySubnet`, `vlanType`. Lab has 8 (legacy 1, people-devices 30,
+  servers 12, camera 66, minecraft 45, management 100, iot 1066, work 666).
+- Devices: `GET /openapi/v1/{om}/sites/{sid}/devices` → all device types in
+  one list with `type` (`gateway`/`switch`/`ap`), `mac`, `ip`, firmware,
+  `status`. The `deviceType` query param appears ignored on 6.3.0.111 —
+  filter client-side.
+- Switch detail + **all physical ports**: `GET /openapi/v1/{om}/sites/{sid}/switches/{mac}`
+  → device info + `portList[]` (`port`, `profileName`, `poeMode`, ...).
+- Clients: `GET /openapi/v1/{om}/sites/{sid}/clients?page=N&pageSize=100`,
+  paginate until `totalRows` reached (lab: 61 clients). Record fields include
+  `ip`, `mac`, `hostName`, `name`, `vid` (VLAN ID), `port` (switch port
+  number for wired), `connectType` (2 = wired), `networkName`, `apName`,
+  `blocked`, `active`, `lastSeen`.
+- PVE-node join: PVE management IPs appear as clients; matching them against
+  `remotes.cfg` node IPs gives node→(port, vlan). Verified live mapping
+  listed in the intent section.
+- Errors: `errorCode != 0` with `msg` (e.g. `-44116` bad auth,
+  `-7131` bad omadacId, `-39050` device not found). Treat non-zero as error
+  and surface `msg`.
+
+## Architecture
+
+### Config — `lib/pdm-config/src/omada.rs` (new module)
+
+Single-controller config in the PDM config dir, following the
+`remotes.rs` pattern: section-style file (e.g. `omada.cfg`) with
+`url`, `omadac-id` (optional: auto-resolve via `/api/info`), `client-id`,
+plus a shadow file (e.g. `omada.shadow`) holding `client-secret`, modeled on
+`remotes.shadow` handling. `init()` registered in
+`server/src/context/mod.rs` next to `pdm_config::remotes::init`.
+
+### Server — `server/src/api/omada/` (new module)
+
+Registered in `server/src/api/mod.rs` SUBDIRS: `("omada", &omada::ROUTER)`.
+
+Methods (phase 1):
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET/PUT | `/omada/config` | Read/update the controller config (PUT masks the secret when unchanged) |
+| GET | `/omada/vlans` | LAN networks (VLANs) |
+| GET | `/omada/devices` | Site devices (gateway/switch/APs), incl. switch `portList` for switches |
+| GET | `/omada/clients` | Clients; server fetches all pages (cap, e.g. 2000) and **annotates** each record with PDM info when its IP matches a PVE remote node IP (remote id + node name) |
+
+Server-side pieces:
+
+- Omada client: reqwest with self-signed-TLS tolerance (pattern:
+  `server/src/connection.rs`), token cached with expiry and refreshed
+  ~5 min before it lapses; single-flight (tokio Mutex) so concurrent API
+  calls don't stampede the token endpoint.
+- Serde response types in `lib/pdm-api-types/src/omada.rs` (new): map the
+  **subset** of fields the UI needs; `#[serde(default)]` + ignore unknowns
+  so Omada schema drift doesn't break parsing.
+- Permissions: reads = `Permission::Privilege(&["system"], PRIV_SYS_AUDIT,
+  false)` (same as Notes); config PUT = `PRIV_SYS_MODIFY`.
+- Config GET/PUT endpoints in the same module, guarded as above; secret
+  write-only on PUT unless explicitly re-sent.
+
+### UI — `ui/src/omada/` (new module)
+
+- Top-level menu item "Omada" in `PdmMainMenu` (`ui/src/main_menu.rs`),
+  registered exactly like Notes (no route change needed; menu key based),
+  gated on `["system"]` `PRIV_SYS_AUDIT`.
+- One view, three stacked/tabbed tables:
+  - **VLANs** — name, VLAN ID, subnet/gateway, DHCP on/off, (device counts
+    computed in the browser from the clients list)
+  - **Switch ports** — per physical port: profile name, POE mode, client
+    (hostname/IP) when present; **PVE nodes visually highlighted** (badge
+    with the PDM remote/node id)
+  - **Clients** — IP, MAC, hostname, VLAN (resolved name via the VLAN
+    list), switch port / AP, online/offline, blocked; client-side search
+    box; PVE-node badge as above
+- Data via `proxmox_yew_comp::http_get("/omada/...")`; auto-refresh ~60 s
+  (builder call). Empty state when no controller configured, linking to a
+  small config form (GET/PUT `/omada/config`).
+
+### Data flow
+
+```
+UI (Yew) ──/api2/json/omada/*──▶ PDM server ──token cache──▶ Omada controller
+  ▲                                (reqwest, self-signed ok)      /openapi/v1/{om}/sites/{sid}/…
+  └──────────────────────────── JSON ─────────────────────────────┘
+```
+
+## Left to the builder
+
+- Exact serde field subset and the error mapping (Omada `errorCode`/`msg` →
+  PDM API error format).
+- Client pagination strategy details (cap value, failure mode on a page
+  error: return partial with a warning field or fail — recommend fail, it's
+  read-only data).
+- Config file format details (follow `remotes.cfg`/shadow conventions).
+- Unit tests: token cache/expiry, client→PVE-remote join logic against
+  fixture JSON; integration test wiring follows `server/tests` style.
+- Whether to also render the gateway/AP device list as a small extra table
+  (recommended yes — the `devices` endpoint is already fetched).
+- Auto-refresh interval and any light caching in the UI.
+
+## Risks
+
+- **Fork maintenance**: rebase on each PDM release. Mitigation: keep the
+  change additive (new files + a handful of registration lines); avoid
+  touching shared code paths.
+- **Undocumented Omada surface**: page-param 400s, ignored `deviceType`,
+  endpoint drift between controller versions. Mitigation: pin mappings to
+  the observed behavior above, permissive deserialization, and a probe
+  script (`omada/omada-probe/` in the homelab repo) to re-verify before
+  deploying a controller upgrade.
+- **Deb build environment**: one-time yak-shave (Proxmox apt deps,
+  `proxmox-wasm-builder`); budget for it in the plan.
+
+## Post-deploy (homelab repo)
+
+Per homelab AGENTS.md, update `docs/` in the same commit as the change that
+reveals it: PDM now also provides network visibility; controller is actually
+v6.3.0.111 (docs say 6.3.0.45) and **is** cloud-registered (docs say not) —
+both discovered during this probe.
