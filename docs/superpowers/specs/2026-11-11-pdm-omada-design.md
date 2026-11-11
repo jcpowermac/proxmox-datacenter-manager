@@ -100,18 +100,34 @@ Probed against the live controller (v6.3.0.111) on 2026-11-11:
   `status`. The `deviceType` query param appears ignored on 6.3.0.111 —
   filter client-side.
 - Switch detail + **all physical ports**: `GET /openapi/v1/{om}/sites/{sid}/switches/{mac}`
-  → device info + `portList[]` (`port`, `profileName`, `poeMode`, ...).
+  → device info + `portList[]` (28 ports on the SG3428).
+  **Port record is thin**: only `port`, `name`, `profileId`, `profileName`,
+  `profileOverrideEnable`, `poeMode`, `lagPort`, `status` (all 28 report
+  `1`). **No PVID, no tagged-VLAN list, no link speed/state.**
+  Probed and unavailable on this controller: `port-profiles`,
+  `switch-port-profiles`, `switches/{mac}/port-profiles` → 404;
+  `switches/ports/poe-info` → `errorCode 0` but **0 rows**. So per-port VLAN
+  membership is *not* reachable over OpenAPI v1 — see the Switch-ports view
+  below for what is shown instead.
 - Clients: `GET /openapi/v1/{om}/sites/{sid}/clients?page=N&pageSize=100`,
   paginate until `totalRows` reached (lab: 61 clients). Record fields include
-  `ip`, `mac`, `hostName`, `name`, `vid` (VLAN ID), `port` (switch port
+  an `result.totalRows` total (not `total`), `ip`, `mac`, `hostName`, `name`,
+  `vid` (VLAN ID), `port` (switch port
   number for wired), `switchMac` + `switchName` (present on wired clients
   connected to Omada-managed switches; verified live: 24 of 29 wired lab
   clients carry it, e.g. pve2 → `28-87-BA-61-24-DE`; wired clients without
   it sit on the ER7206 gateway's own ports), `connectType` (2 = wired),
   `networkName`, `apName`, `blocked`, `active`, `lastSeen`.
-- PVE-node join: PVE management IPs appear as clients; matching them against
-  `remotes.cfg` node IPs gives node→(port, vlan). Verified live mapping
-  listed in the intent section.
+- PVE-node join: PVE management IPs appear as clients (verified `.97`, `.98`,
+  `.99` are all present with port/vid). **But `remotes.cfg` may not hold
+  IPs** — its `nodes` field is `Vec<PropertyString<NodeUrl>>` and the API
+  schema accepts "a cluster node IP *or* hostname", as entered at onboarding.
+  The lab also has two nodes both named `pve` (.97, .99), so name matching is
+  ambiguous. Build the match set per remote as {configured host} ∪ {DNS A
+  records resolved from that host} ∪ {node name}, then match Omada client
+  IPs against it; cache alongside the token. Verify the actual
+  `remotes.cfg` node form before implementing the join. Mapping listed in
+  the intent section.
 - **Port join**: clients → physical ports is done by `switchMac` (client
   record) → switch device, then `port`. Future-proof to a second switch and
   correct for gateway-ported clients (no `switchMac` = ER7206 port, rendered
@@ -144,7 +160,7 @@ Methods (phase 1):
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET/PUT | `/omada/config` | Read/update the controller config (PUT masks the secret when unchanged) |
+| GET/PUT | `/omada/config` | Read/update the controller config. **GET never returns `client-secret`** (renders as unset). PUT with an absent/empty secret keeps the stored one; PUT carries a `ConfigDigest` for lost-update protection, like `config/notes` |
 | GET | `/omada/vlans` | LAN networks (VLANs) |
 | GET | `/omada/devices` | Site devices (gateway/switch/APs), incl. switch `portList` for switches |
 | GET | `/omada/clients` | Clients (optional `?site=`); server fetches all pages (cap, e.g. 2000) and **annotates** each record with PDM info when its IP matches a PVE remote node IP (remote id + node name) |
@@ -164,6 +180,10 @@ Server-side pieces:
   so Omada schema drift doesn't break parsing.
 - Permissions: reads = `Permission::Privilege(&["system"], PRIV_SYS_AUDIT,
   false)` (same as Notes); config PUT = `PRIV_SYS_MODIFY`.
+- `/omada/devices` fans out one `switches/{mac}` call per switch to get
+  `portList` (N+1, fine for one switch, note it).
+- Optional short-TTL memo cache (~10-15 s) on the upstream reads: the UI
+  auto-refreshes and the controller drops connections under bursty load.
 - Config GET/PUT endpoints in the same module, guarded as above; secret
   write-only on PUT unless explicitly re-sent.
 
@@ -175,9 +195,13 @@ Server-side pieces:
 - One view, three stacked/tabbed tables:
   - **VLANs** — name, VLAN ID, subnet/gateway, DHCP on/off, (device counts
     computed in the browser from the clients list)
-  - **Switch ports** — per physical port: profile name, POE mode, client
-    (hostname/IP) when present; **PVE nodes visually highlighted** (badge
-    with the PDM remote/node id)
+  - **Switch ports** — one row per physical port: port number, name, port
+    **profile name** (the only VLAN signal v1 exposes; the profile's VLAN
+    list is not available per port), PoE mode, and the **client on that port**
+    (hostname/IP, resolved from the clients join); **PVE nodes visually
+    highlighted** (badge with the PDM remote/node id). Explicitly do not
+    promise PVID/tagged VLANs or link speed — v1 does not expose them
+    (verified above).
   - **Clients** — IP, MAC, hostname, VLAN (resolved name via the VLAN
     list), switch port / AP, online/offline, blocked; client-side search
     box; PVE-node badge as above
@@ -223,6 +247,11 @@ UI (Yew) ──/api2/json/omada/*──▶ PDM server ──token cache──▶
   deploying a controller upgrade.
 - **Deb build environment**: one-time yak-shave (Proxmox apt deps,
   `proxmox-wasm-builder`); budget for it in the plan.
+- **Package upgrade / rollback**: this replaces a distro package on a live
+  service. Build a fork-versioned package (e.g. `1.1.9+omada1`) so apt never
+  advertises an upgrade over it, `apt-mark hold` the package in LXC 103, keep
+  the stock `.deb` for rollback, and record the rollback command. Budget
+  decision for the owner under Q3.
 
 ## Post-deploy (homelab repo)
 
