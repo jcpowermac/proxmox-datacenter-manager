@@ -104,11 +104,23 @@ Probed against the live controller (v6.3.0.111) on 2026-11-11:
 - Clients: `GET /openapi/v1/{om}/sites/{sid}/clients?page=N&pageSize=100`,
   paginate until `totalRows` reached (lab: 61 clients). Record fields include
   `ip`, `mac`, `hostName`, `name`, `vid` (VLAN ID), `port` (switch port
-  number for wired), `connectType` (2 = wired), `networkName`, `apName`,
-  `blocked`, `active`, `lastSeen`.
+  number for wired), `switchMac` + `switchName` (present on wired clients
+  connected to Omada-managed switches; verified live: 24 of 29 wired lab
+  clients carry it, e.g. pve2 → `28-87-BA-61-24-DE`; wired clients without
+  it sit on the ER7206 gateway's own ports), `connectType` (2 = wired),
+  `networkName`, `apName`, `blocked`, `active`, `lastSeen`.
 - PVE-node join: PVE management IPs appear as clients; matching them against
   `remotes.cfg` node IPs gives node→(port, vlan). Verified live mapping
   listed in the intent section.
+- **Port join**: clients → physical ports is done by `switchMac` (client
+  record) → switch device, then `port`. Future-proof to a second switch and
+  correct for gateway-ported clients (no `switchMac` = ER7206 port, rendered
+  as "gateway port N").
+- **Site parameter**: all site-scoped GETs take an optional `?site=<siteId>`;
+  default = the sole site resolved from `GET /sites` (cached with the token).
+  No `site` entry in the config in phase 1.
+- Controller drops connections under bursty load (see lab `omada/NOTES.md`):
+  the Omada HTTP client needs retry-with-backoff, not just token caching.
 - Errors: `errorCode != 0` with `msg` (e.g. `-44116` bad auth,
   `-7131` bad omadacId, `-39050` device not found). Treat non-zero as error
   and surface `msg`.
@@ -135,14 +147,18 @@ Methods (phase 1):
 | GET/PUT | `/omada/config` | Read/update the controller config (PUT masks the secret when unchanged) |
 | GET | `/omada/vlans` | LAN networks (VLANs) |
 | GET | `/omada/devices` | Site devices (gateway/switch/APs), incl. switch `portList` for switches |
-| GET | `/omada/clients` | Clients; server fetches all pages (cap, e.g. 2000) and **annotates** each record with PDM info when its IP matches a PVE remote node IP (remote id + node name) |
+| GET | `/omada/clients` | Clients (optional `?site=`); server fetches all pages (cap, e.g. 2000) and **annotates** each record with PDM info when its IP matches a PVE remote node IP (remote id + node name) |
+
+`/omada/vlans` and `/omada/devices` also accept the optional `?site=` param.
 
 Server-side pieces:
 
 - Omada client: reqwest with self-signed-TLS tolerance (pattern:
   `server/src/connection.rs`), token cached with expiry and refreshed
   ~5 min before it lapses; single-flight (tokio Mutex) so concurrent API
-  calls don't stampede the token endpoint.
+  calls don't stampede the token endpoint; retry-with-backoff on
+  connection-level failures (the controller drops connections under bursty
+  load).
 - Serde response types in `lib/pdm-api-types/src/omada.rs` (new): map the
   **subset** of fields the UI needs; `#[serde(default)]` + ignore unknowns
   so Omada schema drift doesn't break parsing.
@@ -189,6 +205,10 @@ UI (Yew) ──/api2/json/omada/*──▶ PDM server ──token cache──▶
   fixture JSON; integration test wiring follows `server/tests` style.
 - Whether to also render the gateway/AP device list as a small extra table
   (recommended yes — the `devices` endpoint is already fetched).
+- **Open for owner (Q3)**: does this engagement end at "custom `.deb`
+  builds + integration tests pass", or at "installed over stock PDM in
+  LXC 103, Omada section verified live, homelab `docs/` updated in the same
+  commit"? The plan's deployment/validation tail depends on the answer.
 - Auto-refresh interval and any light caching in the UI.
 
 ## Risks
