@@ -150,6 +150,106 @@ async fn test_clients_requires_configured_controller() {
     );
 }
 
+#[tokio::test]
+async fn test_config_endpoints() {
+    common::test_setup();
+
+    // The endpoints read/write the global config location; create the
+    // directory and clear leftovers from a previous run first.
+    setup_config_dir();
+    clean_config_files();
+
+    // Unconfigured: all fields null, no secret.
+    let view: serde_json::Value =
+        server::api::omada::get_config(&mut common::rpcenv()).unwrap();
+    assert!(view["url"].is_null());
+    assert_eq!(view["secret_set"], false);
+    assert!(view["digest"].is_null());
+    assert!(view.get("client_secret").is_none());
+
+    // Configure with a secret.
+    let stored = server::api::omada::update_config(
+        "https://172.31.12.45:8043".into(),
+        Some("OM-1234".into()),
+        "app-id".into(),
+        Some("s3cret".into()),
+        None,
+    );
+    assert_eq!(stored.unwrap(), true);
+
+    let view: serde_json::Value =
+        server::api::omada::get_config(&mut common::rpcenv()).unwrap();
+    assert_eq!(view["url"], "https://172.31.12.45:8043");
+    assert_eq!(view["omadac_id"], "OM-1234");
+    assert_eq!(view["client_id"], "app-id");
+    assert_eq!(view["secret_set"], true);
+    assert!(view.get("client_secret").is_none());
+    assert!(view["digest"].is_string());
+
+    let (stored_remote, digest) = pdm_config::omada::read().unwrap();
+    let stored_remote = stored_remote.unwrap();
+    assert_eq!(stored_remote.client_secret.as_deref(), Some("s3cret"));
+
+    // Update with an empty secret: the stored one is kept.
+    let stored = server::api::omada::update_config(
+        "https://172.31.12.45:8043".into(),
+        None,
+        "app-id".into(),
+        Some(String::new()),
+        Some(digest),
+    );
+    assert_eq!(stored.unwrap(), true);
+    let (stored_remote, _digest) = pdm_config::omada::read().unwrap();
+    assert_eq!(
+        stored_remote.unwrap().client_secret.as_deref(),
+        Some("s3cret"),
+        "empty secret in the PUT must keep the stored one"
+    );
+
+    // A stale digest is rejected: capture the digest, change the config,
+    // then PUT again with the now-stale digest.
+    let (current_remote, current_digest) = pdm_config::omada::read().unwrap();
+    server::api::omada::update_config(
+        "https://172.31.12.45:8043".into(),
+        Some("OM-9999".into()),
+        current_remote.unwrap().client_id.clone(),
+        None,
+        Some(current_digest.clone()),
+    )
+    .unwrap();
+    let stale = server::api::omada::update_config(
+        "https://172.31.12.45:8043".into(),
+        None,
+        "app-id".into(),
+        None,
+        Some(current_digest),
+    );
+    assert!(stale.is_err(), "stale digest must be rejected");
+
+    clean_config_files();
+}
+
+fn clean_config_files() {
+    let _ = std::fs::remove_file(pdm_config::omada::OMADA_CFG_FILENAME);
+    let _ = std::fs::remove_file(pdm_config::omada::OMADA_SHADOW_FILENAME);
+}
+
+fn setup_config_dir() {
+    // The config location comes from the build config; in tests the directory
+    // may not exist yet (packaging creates it in production). It must be
+    // writable by the test user.
+    let parent = std::path::Path::new(pdm_config::omada::OMADA_CFG_FILENAME)
+        .parent()
+        .expect("config file has a parent directory");
+    std::fs::create_dir_all(parent).unwrap_or_else(|err| {
+        panic!(
+            "could not create config dir {}: {err} (in a test environment it must exist and be writable)"
+            ,
+            parent.display()
+        )
+    });
+}
+
 /// The shared test application wiring: one PVE remote with a single node
 /// (172.31.12.97) and the fixture-backed Omada client.
 fn test_app() -> common::TestApplication {

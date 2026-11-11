@@ -6,6 +6,8 @@
 
 use async_trait::async_trait;
 
+use proxmox_schema::api;
+
 /// The four read-only list endpoints the PDM server proxies.
 ///
 /// `site` is an optional site id override; `None` means "the client's default
@@ -145,11 +147,19 @@ pub struct OmadaDevicesView {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+/// The Omada controller configuration as seen by the API (the client secret
+/// is write-only; `secret_set` indicates whether one is stored).
+#[api]
 pub struct OmadaConfigView {
+    /// Base URL of the Omada controller.
     pub url: Option<String>,
+    /// The controller's omadacId, if known.
     pub omadac_id: Option<String>,
+    /// The OpenAPI client ID.
     pub client_id: Option<String>,
+    /// Whether a client secret is stored.
     pub secret_set: bool,
+    /// Digest of the stored config, for optimistic concurrency.
     pub digest: Option<String>,
 }
 

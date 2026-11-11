@@ -27,7 +27,7 @@ use proxmox_section_config::{SectionConfig, SectionConfigPlugin};
 use pdm_buildcfg::configdir;
 
 pub const OMADA_CFG_FILENAME: &str = configdir!("/omada.cfg");
-const OMADA_SHADOW_FILENAME: &str = configdir!("/omada.shadow");
+pub const OMADA_SHADOW_FILENAME: &str = configdir!("/omada.shadow");
 pub const OMADA_CFG_LOCKFILE: &str = configdir!("/.omada.lock");
 pub const OMADA_SECTION_ID: &str = "omada";
 

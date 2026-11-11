@@ -13,9 +13,12 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Error};
 use pdm_api_types::omada::{
-    OmadaApiClient, OmadaClient, OmadaClientEntry, OmadaDevice, OmadaDevicesView, OmadaVlan,
+    OmadaApiClient, OmadaClient, OmadaClientEntry, OmadaConfigPut, OmadaConfigView,
+    OmadaDevice, OmadaDevicesView, OmadaVlan,
 };
-use pdm_api_types::PRIV_SYS_AUDIT;
+use pdm_api_types::{PRIV_SYS_AUDIT, PRIV_SYS_MODIFY};
+use pdm_config::omada::OmadaRemote;
+use proxmox_config_digest::ConfigDigest;
 use proxmox_router::{Permission, Router, RpcEnvironment};
 use proxmox_schema::api;
 use serde::{Deserialize, Serialize};
@@ -242,10 +245,122 @@ async fn annotate_entries(
     Ok(())
 }
 
+/// Build the config response from the stored remote, if any.
+///
+/// The secret itself is never included; only `secret_set` tells the caller
+/// whether one is stored.
+fn config_view_from(
+    remote: Option<&OmadaRemote>,
+    digest: &ConfigDigest,
+) -> serde_json::Value {
+    serde_json::json!({
+        "url": remote.map(|r| r.url.clone()),
+        "omadac_id": remote.and_then(|r| r.omadac_id.clone()),
+        "client_id": remote.map(|r| r.client_id.clone()),
+        "secret_set": remote.and_then(|r| r.client_secret.as_ref()).is_some(),
+        "digest": remote.map(|_| digest.to_hex()),
+    })
+}
+
+/// Merge a PUT into the current remote: an absent or empty `client_secret`
+/// keeps the stored secret, anything else replaces it.
+fn merge_put(current: Option<&OmadaRemote>, put: &OmadaConfigPut) -> Result<OmadaRemote, Error> {
+    let client_secret = match put.client_secret.as_deref() {
+        Some(secret) if !secret.is_empty() => Some(secret.to_string()),
+        _ => current.and_then(|current| current.client_secret.clone()),
+    };
+
+    Ok(OmadaRemote {
+        url: put.url.clone(),
+        omadac_id: put.omadac_id.clone(),
+        client_id: put.client_id.clone(),
+        client_secret,
+    })
+}
+
+#[api(
+    access: {
+        permission: &Permission::Privilege(&["system"], PRIV_SYS_AUDIT, false),
+        description: "Read the Omada controller configuration (secret is write-only).",
+    },
+    returns: { type: OmadaConfigView },
+)]
+/// Get the Omada controller configuration.
+pub fn get_config(
+    _rpcenv: &mut dyn RpcEnvironment,
+) -> Result<serde_json::Value, Error> {
+    let (remote, digest) = pdm_config::omada::read()?;
+    Ok(config_view_from(remote.as_ref(), &digest))
+}
+
+#[api(
+    input: {
+        properties: {
+            url: {
+                type: String,
+                description: "Base URL of the Omada controller (e.g. https://172.31.12.45:8043).",
+            },
+            omadac_id: {
+                type: String,
+                optional: true,
+                description: "The controller's omadacId; resolved automatically when absent.",
+            },
+            client_id: {
+                type: String,
+                description: "The OpenAPI client ID.",
+            },
+            client_secret: {
+                type: String,
+                optional: true,
+                description: "The OpenAPI client secret; keep absent or empty to retain the stored one.",
+            },
+            digest: {
+                type: ConfigDigest,
+                optional: true,
+            },
+        }
+    },
+    access: {
+        permission: &Permission::Privilege(&["system", "omada"], PRIV_SYS_MODIFY, false),
+        description: "Update the Omada controller configuration.",
+    }
+)]
+/// Update the Omada controller configuration.
+pub fn update_config(
+    url: String,
+    omadac_id: Option<String>,
+    client_id: String,
+    client_secret: Option<String>,
+    digest: Option<ConfigDigest>,
+) -> Result<bool, Error> {
+    let (current, expected_digest) = pdm_config::omada::read()?;
+
+    if digest.is_some() {
+        expected_digest.detect_modification(digest.as_ref())?;
+    }
+
+    let merged = merge_put(
+        current.as_ref(),
+        &OmadaConfigPut {
+            url,
+            omadac_id,
+            client_id,
+            client_secret,
+            digest: None,
+        },
+    )?;
+
+    pdm_config::omada::save(&merged)?;
+
+    Ok(true)
+}
+
 pub const ROUTER: Router = Router::new()
     .get(&API_METHOD_LIST_VLANS)
     .get(&API_METHOD_LIST_DEVICES)
-    .get(&API_METHOD_LIST_CLIENTS);
+    .get(&API_METHOD_LIST_CLIENTS)
+    .get(&API_METHOD_GET_CONFIG)
+    .put(&API_METHOD_UPDATE_CONFIG);
 
 #[cfg(test)]
 mod tests {
@@ -277,5 +392,109 @@ mod tests {
 
         // Drop the entry so parallel tests do not see it.
         memo().entries.lock().await.remove(&key);
+    }
+
+    fn remote_with_secret() -> OmadaRemote {
+        OmadaRemote {
+            url: "https://172.31.12.45:8043".into(),
+            omadac_id: Some("OM-1234".into()),
+            client_id: "app-id".into(),
+            client_secret: Some("old".into()),
+        }
+    }
+
+    fn secret_of(remote: &OmadaRemote) -> &str {
+        remote.client_secret.as_deref().expect("has a secret")
+    }
+
+    #[test]
+    fn view_never_leaks_secret() {
+        let v = config_view_from(Some(&remote_with_secret()), &ConfigDigest::from_slice([]));
+        assert_eq!(v["secret_set"], true);
+        assert!(v.get("client_secret").is_none());
+        assert_eq!(v["url"], "https://172.31.12.45:8043");
+        assert!(v["digest"].is_string());
+    }
+
+    #[test]
+    fn view_unset_when_no_section() {
+        let v = config_view_from(None, &ConfigDigest::from_slice([]));
+        assert_eq!(v["secret_set"], false);
+        assert!(v["url"].is_null());
+        assert!(v["digest"].is_null());
+    }
+
+    #[test]
+    fn put_with_absent_secret_keeps_stored_one() {
+        let cur = remote_with_secret();
+        let merged = merge_put(
+            Some(&cur),
+            &OmadaConfigPut {
+                url: cur.url.clone(),
+                omadac_id: None,
+                client_id: cur.client_id.clone(),
+                client_secret: None,
+                digest: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(secret_of(&merged), "old");
+    }
+
+    #[test]
+    fn put_with_empty_secret_keeps_stored_one() {
+        let cur = remote_with_secret();
+        let merged = merge_put(
+            Some(&cur),
+            &OmadaConfigPut {
+                url: cur.url.clone(),
+                omadac_id: None,
+                client_id: cur.client_id.clone(),
+                client_secret: Some(String::new()),
+                digest: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(secret_of(&merged), "old");
+    }
+
+    #[test]
+    fn put_with_new_secret_replaces() {
+        let cur = remote_with_secret();
+        let merged = merge_put(
+            Some(&cur),
+            &OmadaConfigPut {
+                url: cur.url.clone(),
+                omadac_id: None,
+                client_id: cur.client_id.clone(),
+                client_secret: Some("new".into()),
+                digest: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(secret_of(&merged), "new");
+    }
+
+    #[test]
+    fn put_without_stored_secret_stays_absent() {
+        let merged = merge_put(
+            None,
+            &OmadaConfigPut {
+                url: "https://omada:8043".into(),
+                omadac_id: None,
+                client_id: "id".into(),
+                client_secret: None,
+                digest: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(merged.client_secret, None);
+    }
+
+    #[test]
+    fn stale_digest_is_rejected() {
+        let expected = ConfigDigest::from_slice(b"current");
+        let stale = ConfigDigest::from_slice(b"other");
+        assert!(expected.detect_modification(Some(&stale)).is_err());
     }
 }

@@ -44,6 +44,7 @@ pub fn test_setup() {
             .expect("test user lookup succeeded")
             .expect("test user exists in the user database");
         proxmox_product_config::init(user.clone(), user);
+        pdm_config::omada::init();
 
         let base = env!("CARGO_TARGET_TMPDIR");
 
