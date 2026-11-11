@@ -108,6 +108,9 @@ pub mod firewall;
 
 pub mod remotes;
 
+pub mod omada;
+pub use omada::*;
+
 pub mod remote_updates;
 
 pub mod resource;
