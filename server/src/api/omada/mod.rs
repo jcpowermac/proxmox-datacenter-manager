@@ -30,6 +30,7 @@ use crate::api::omada::join::{
 };
 use crate::context::PdmApplication;
 
+pub mod guest_ports;
 pub mod http;
 pub mod join;
 
@@ -396,6 +397,7 @@ const SUBDIRS: SubdirMap = &sorted!([
     ("clients", &Router::new().get(&API_METHOD_LIST_CLIENTS)),
     ("config", &Router::new().get(&API_METHOD_GET_CONFIG).put(&API_METHOD_UPDATE_CONFIG)),
     ("devices", &Router::new().get(&API_METHOD_LIST_DEVICES)),
+    ("guest-ports", &Router::new().get(&guest_ports::API_METHOD_LIST_GUEST_PORTS)),
     ("vlans", &Router::new().get(&API_METHOD_LIST_VLANS)),
 ]);
 
@@ -421,6 +423,7 @@ mod tests {
             ("vlans", ::http::Method::GET),
             ("devices", ::http::Method::GET),
             ("clients", ::http::Method::GET),
+            ("guest-ports", ::http::Method::GET),
             ("config", ::http::Method::GET),
             ("config", ::http::Method::PUT),
         ] {

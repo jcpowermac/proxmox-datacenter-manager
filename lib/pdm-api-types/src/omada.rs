@@ -179,6 +179,41 @@ pub struct OmadaDevicesView {
     pub warnings: Vec<String>,
 }
 
+/// One NIC of a guest matched to an Omada switch port.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmadaGuestPortMatch {
+    /// The guest NIC MAC that matched an Omada client.
+    pub mac: String,
+    /// Name of the Omada switch, if known.
+    pub switch: Option<String>,
+    /// Port number on the switch.
+    pub port: Option<i32>,
+}
+
+/// One guest (VM or container) and the Omada switch port(s) its NIC MACs are
+/// currently on, if any. Computed server-side by joining PVE guest NIC MACs
+/// (from per-guest config) with the Omada client list.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmadaGuestPort {
+    /// PDM remote id.
+    pub remote: String,
+    /// PVE node name.
+    pub node: String,
+    /// Guest VMID (VM) or CTID (container).
+    pub vmid: u32,
+    /// Guest name.
+    pub name: String,
+    /// The guest's NIC MACs (best effort, from PVE config).
+    #[serde(default)]
+    pub macs: Vec<String>,
+    /// Omada switch ports matched by those MACs (empty = none on a managed
+    /// switch).
+    #[serde(default)]
+    pub ports: Vec<OmadaGuestPortMatch>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 /// The Omada controller configuration as seen by the API (the client secret
 /// is write-only; `secret_set` indicates whether one is stored).

@@ -7,7 +7,8 @@
 //! deep link into the originating remote's web UI. It is currently surfaced as a
 //! tab in the Remotes view.
 
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -20,8 +21,9 @@ use yew::virtual_dom::{Key, VComp, VNode};
 use proxmox_human_byte::HumanByte;
 use proxmox_yew_comp::utils::format_duration_human;
 use proxmox_yew_comp::{
-    LoadableComponent, LoadableComponentContext, LoadableComponentMaster, LoadableComponentScope,
-    LoadableComponentScopeExt, LoadableComponentState, rrd_value_renderer,
+    http_get, LoadableComponent, LoadableComponentContext, LoadableComponentMaster,
+    LoadableComponentScope, LoadableComponentScopeExt, LoadableComponentState,
+    rrd_value_renderer,
 };
 
 use pwt::css::{AlignItems, ColorScheme, FlexFit, JustifyContent};
@@ -38,6 +40,7 @@ use pwt::widget::{
     Toolbar, Tooltip, Trigger,
 };
 
+use pdm_api_types::omada::{OmadaGuestPort, OmadaGuestPortMatch};
 use pdm_api_types::RemoteUpid;
 use pdm_api_types::resource::{AsResourceView, RemoteResources, Resource};
 use pdm_search::SearchTerm;
@@ -214,6 +217,8 @@ pub enum Msg {
     /// Show the progress of a started task, deriving the task base URL from the
     /// UPID's own remote so concurrent actions on different remotes can't clobber it.
     ShowTask(RemoteUpid),
+    /// Omada switch-port data arrived (best effort; may be empty).
+    GuestPortsLoaded(Vec<OmadaGuestPort>),
 }
 
 #[doc(hidden)]
@@ -234,6 +239,9 @@ pub struct GuestPanelComp {
     remote_count: usize,
     /// Remotes that could not be queried, surfaced as a non-blocking banner.
     failed_remotes: Vec<String>,
+    /// Omada switch-port annotation keyed by `remote:node:vmid`; best effort,
+    /// empty when no Omada controller is configured.
+    guest_ports: Rc<RefCell<HashMap<String, Vec<OmadaGuestPortMatch>>>>,
 }
 
 pwt::impl_deref_mut_property!(GuestPanelComp, state, LoadableComponentState<ViewState>);
@@ -269,18 +277,20 @@ impl LoadableComponent for GuestPanelComp {
         // root stays hidden so the remote groups are the top-level rows
         let tree_store = TreeStore::new().view_root(false);
 
+        let guest_ports = Rc::new(RefCell::new(HashMap::new()));
         Self {
             state: LoadableComponentState::new(),
             store: Store::with_extract_key(|entry: &GuestEntry| entry.key()),
             tree_columns: tree_columns(ctx.link().clone(), tree_store.clone()),
             tree_store,
-            flat_columns: flat_columns(ctx.link().clone()),
+            flat_columns: flat_columns(ctx.link().clone(), guest_ports.clone()),
             selection: Selection::new(),
             filter: String::new(),
             view_mode: PersistentState::new(StorageLocation::local("VirtualGuestsViewMode")),
             tree_built: false,
             remote_count: 0,
             failed_remotes: Vec::new(),
+            guest_ports,
         }
     }
 
@@ -320,6 +330,14 @@ impl LoadableComponent for GuestPanelComp {
                     self.tree_built = true;
                 }
                 self.store.set_data(entries);
+            }
+            Msg::GuestPortsLoaded(ports) => {
+                let mut map = HashMap::new();
+                for port in ports {
+                    let key = format!("{}:{}:{}", port.remote, port.node, port.vmid);
+                    map.insert(key, port.ports);
+                }
+                *self.guest_ports.borrow_mut() = map;
             }
             Msg::Filter(text) => {
                 self.filter = text;
@@ -601,6 +619,12 @@ impl LoadableComponent for GuestPanelComp {
             // `None` lets the server apply its default cache max-age.
             let remotes = crate::pdm_client().resources(None, None).await?;
             link.send_message(Msg::LoadFinished(remotes));
+            // Best-effort Omada switch-port annotation. A missing/unconfigured
+            // controller (or any error) just leaves the column empty; it must
+            // not break the guest list.
+            if let Ok(ports) = http_get::<Vec<OmadaGuestPort>>("/omada/guest-ports", None).await {
+                link.send_message(Msg::GuestPortsLoaded(ports));
+            }
             Ok(())
         })
     }
@@ -849,6 +873,7 @@ fn guest_actions(link: &LoadableComponentScope<GuestPanelComp>, entry: &GuestEnt
 
 fn flat_columns(
     link: LoadableComponentScope<GuestPanelComp>,
+    guest_ports: Rc<RefCell<HashMap<String, Vec<OmadaGuestPortMatch>>>>,
 ) -> Rc<Vec<DataTableHeader<GuestEntry>>> {
     Rc::new(vec![
         DataTableColumn::new(tr!("Name"))
@@ -877,6 +902,32 @@ fn flat_columns(
         DataTableColumn::new(tr!("Node"))
             .flex(1)
             .get_property(|entry: &GuestEntry| entry.node())
+            .into(),
+        DataTableColumn::new(tr!("Switch Port"))
+            .flex(1)
+            .render({
+                let guest_ports = guest_ports.clone();
+                move |entry: &GuestEntry| {
+                    let key =
+                        format!("{}:{}:{}", entry.remote, entry.node(), entry.vmid());
+                    let guard = guest_ports.borrow();
+                    let text = match guard.get(&key) {
+                        Some(ports) if !ports.is_empty() => ports
+                            .iter()
+                            .map(|p| {
+                                format!(
+                                    "{}:{}",
+                                    p.switch.as_deref().unwrap_or("?"),
+                                    p.port.unwrap_or(-1)
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        _ => "—".to_string(),
+                    };
+                    text.into()
+                }
+            })
             .into(),
         DataTableColumn::new(tr!("Tags"))
             .flex(1)
