@@ -39,9 +39,19 @@ pub fn build_match_map(
     for remote in remotes {
         for node in &remote.nodes {
             let value = (remote.id.clone(), node.node_name.clone());
+            // Node hostnames may carry an optional port ("host:8006" or
+            // "ip:8006"); strip it so bare hostnames/IPs from the Omada side
+            // still match.
+            let host = host_without_port(&node.hostname);
             map.entry(node.hostname.clone())
                 .or_insert_with(|| value.clone());
-            for ip in dns.get(&node.hostname).into_iter().flatten() {
+            map.entry(host.to_string()).or_insert_with(|| value.clone());
+            for ip in dns
+                .get(&node.hostname)
+                .into_iter()
+                .chain(dns.get(host))
+                .flatten()
+            {
                 map.entry(ip.clone()).or_insert_with(|| value.clone());
             }
             if let Some(node_name) = &node.node_name {
@@ -52,6 +62,14 @@ pub fn build_match_map(
     }
 
     map
+}
+
+/// Strip an optional `:port` suffix from a node hostname.
+fn host_without_port(host: &str) -> &str {
+    // A bare IP literal can carry a port ("172.31.12.97:8006"); a hostname
+    // can ("pve1:8006"). rsplit_once keeps the first label intact for IPv6
+    // literals only when the bracket form is used, which is good enough here.
+    host.rsplit_once(':').map_or(host, |(host, _port)| host)
 }
 
 /// Annotate a single client entry in place.
@@ -175,6 +193,34 @@ mod tests {
 
     fn dns() -> HashMap<String, Vec<String>> {
         [("node2.example".into(), vec!["172.31.12.99".into()])].into()
+    }
+
+    #[test]
+    fn strips_optional_port_from_node_hosts() {
+        let remotes = vec![RemoteJoinEntry {
+            id: "pve-lab".into(),
+            nodes: vec![
+                RemoteNodeEntry {
+                    hostname: "172.31.12.97:8006".into(),
+                    node_name: None,
+                },
+                RemoteNodeEntry {
+                    hostname: "pve1.example:8006".into(),
+                    node_name: None,
+                },
+            ],
+        }];
+        let map = build_match_map(&remotes, &HashMap::new());
+        assert_eq!(
+            map.get("172.31.12.97").map(|(r, _)| r.clone()),
+            Some("pve-lab".into())
+        );
+        assert_eq!(
+            map.get("pve1.example").map(|(r, _)| r.clone()),
+            Some("pve-lab".into())
+        );
+        // The full host:port form still matches too.
+        assert_eq!(map.contains_key("172.31.12.97:8006"), true);
     }
 
     #[test]

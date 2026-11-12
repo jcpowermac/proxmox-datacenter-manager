@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Error};
@@ -31,6 +31,41 @@ use crate::context::PdmApplication;
 
 pub mod http;
 pub mod join;
+
+/// Process-wide client cache: one client per configuration digest, so the
+/// token/site/omdadacId caches outlive a single request and are only rebuilt
+/// when the configuration actually changes.
+static CLIENT_CACHE: Mutex<Option<(ConfigDigest, Arc<dyn OmadaApiClient>)>> = Mutex::new(None);
+
+pub(crate) fn cached_omada_client(
+    remote: &OmadaRemote,
+    digest: &ConfigDigest,
+) -> Result<Arc<dyn OmadaApiClient>, Error> {
+    let make = || -> Result<Arc<dyn OmadaApiClient>, Error> {
+        Ok(Arc::new(http::OmadaHttpClient::new(remote)?))
+    };
+
+    let mut guard = match CLIENT_CACHE.lock() {
+        Ok(guard) => guard,
+        // Poisoned lock: fall back to a fresh client.
+        Err(_) => return make(),
+    };
+
+    if let Some((cached_digest, client)) = guard.as_ref() {
+        if cached_digest == digest {
+            return Ok(Arc::clone(client));
+        }
+    }
+
+    let client = make()?;
+    *guard = Some((digest.clone(), Arc::clone(&client)));
+    Ok(client)
+}
+
+/// Drop all memoized upstream responses (used by tests).
+pub async fn flush_memo() {
+    memo().entries.lock().await.clear();
+}
 
 /// Memoize upstream Omada responses for a short TTL.
 struct Memo {
@@ -80,6 +115,12 @@ fn omada_client(app: &PdmApplication) -> Result<std::sync::Arc<dyn OmadaApiClien
         .context("no Omada controller configured, add one under /omada/config")
 }
 
+/// The upstream site override: an empty/omitted site means "the
+/// controller's default site", resolved by the client.
+fn upstream_site(site: &str) -> Option<&str> {
+    if site.is_empty() { None } else { Some(site) }
+}
+
 #[api(
     input: {
         properties: {
@@ -103,10 +144,10 @@ pub async fn list_vlans(
 ) -> Result<Vec<OmadaVlan>, Error> {
     let site = site.unwrap_or_default();
     let client = omada_client(&app)?;
-    let upstream_site = site.clone();
+    let upstream = upstream_site(&site);
 
     memo_get(&format!("vlans:{site}"), async move {
-        client.vlans(Some(&upstream_site)).await
+        client.vlans(upstream).await
     })
     .await
     .with_context(|| format!("failed to list Omada VLANs for site '{site}'"))
@@ -140,10 +181,10 @@ pub async fn list_devices(
     // Cache the upstream data only; the per-switch port fan-out (and its
     // warnings) is recomputed on every call.
     let upstream_client = std::sync::Arc::clone(&client);
-    let upstream_site = site.clone();
+    let upstream = upstream_site(&site);
 
     let mut devices: Vec<OmadaDevice> = memo_get(&format!("devices:{site}"), async move {
-        upstream_client.devices(Some(&upstream_site)).await
+        upstream_client.devices(upstream).await
     })
     .await
     .with_context(|| format!("failed to list Omada devices for site '{site}'"))?;
@@ -159,7 +200,7 @@ pub async fn list_devices(
             continue;
         };
 
-        match client.switch_ports(Some(&site), &mac).await {
+        match client.switch_ports(upstream_site(&site), &mac).await {
             Ok(ports) => device.port_list = Some(ports),
             Err(err) => warnings.push(format!("switch {mac}: {err}")),
         }
@@ -192,10 +233,10 @@ pub async fn list_clients(
 ) -> Result<Vec<OmadaClientEntry>, Error> {
     let site = site.unwrap_or_default();
     let client = omada_client(&app)?;
-    let upstream_site = site.clone();
+    let upstream = upstream_site(&site);
 
     let clients: Vec<OmadaClient> = memo_get(&format!("clients:{site}"), async move {
-        client.clients(Some(&upstream_site)).await
+        client.clients(upstream).await
     })
     .await
     .with_context(|| format!("failed to list Omada clients for site '{site}'"))?;

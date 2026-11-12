@@ -44,8 +44,23 @@ pub struct OmadaVlan {
     pub vlan: Option<u32>,
     #[serde(default)]
     pub gateway_subnet: Option<String>,
+    /// Nested wire shape: `dhcpSettingsVO: {dhcp: bool}`.
+    #[serde(default, rename = "dhcpSettingsVO")]
+    pub dhcp_settings: Option<OmadaDhcpSettings>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OmadaDhcpSettings {
     #[serde(default)]
     pub dhcp: Option<bool>,
+}
+
+impl OmadaVlan {
+    /// Whether DHCP is enabled on the VLAN.
+    pub fn dhcp(&self) -> Option<bool> {
+        self.dhcp_settings.and_then(|d| d.dhcp)
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
@@ -188,6 +203,15 @@ mod tests {
         assert_eq!(v.vlan, Some(12));
         assert_eq!(v.name.as_deref(), Some("servers"));
         assert_eq!(v.gateway_subnet.as_deref(), Some("172.31.12.0/24"));
+        assert_eq!(v.dhcp(), Some(true));
+
+        let off: OmadaVlan =
+            serde_json::from_str(r#"{"vlan":1066,"name":"iot","dhcpSettingsVO":{"dhcp":false}}"#)
+                .unwrap();
+        assert_eq!(off.dhcp(), Some(false));
+
+        let missing: OmadaVlan = serde_json::from_str(r#"{"vlan":5}"#).unwrap();
+        assert_eq!(missing.dhcp(), None);
     }
 
     #[test]

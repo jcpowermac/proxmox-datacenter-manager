@@ -401,14 +401,16 @@ impl ClientFactory for DefaultClientFactory {
     fn make_omada_client(
         &self,
     ) -> Result<Option<std::sync::Arc<dyn pdm_api_types::omada::OmadaApiClient>>, Error> {
-        let (remote, _digest) = pdm_config::omada::read()?;
+        let (remote, digest) = pdm_config::omada::read()?;
         let Some(remote) = remote else {
             return Ok(None);
         };
 
-        Ok(Some(std::sync::Arc::new(
-            crate::api::omada::http::OmadaHttpClient::new(&remote)?,
-        )))
+        // Cached per config digest so the client's token/site caches survive
+        // across requests.
+        Ok(Some(crate::api::omada::cached_omada_client(
+            &remote, &digest,
+        )?))
     }
 
     fn make_pve_client_with_endpoint(

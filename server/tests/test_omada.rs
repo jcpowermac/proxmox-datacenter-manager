@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use pdm_api_types::omada::{OmadaApiClient, OmadaClient, OmadaDevice, OmadaPort, OmadaVlan};
-use server::context::ContextFactory;
+use server::context::{ContextFactory, PdmApplication};
 
 pub mod common;
 
@@ -122,6 +122,83 @@ async fn test_vlans_passthrough() {
     assert_eq!(vlans.len(), 2);
     let servers = vlans.iter().find(|v| v.vlan == Some(12)).unwrap();
     assert_eq!(servers.name.as_deref(), Some("servers"));
+    // The captured wire shape carries the nested dhcpSettingsVO.
+    assert_eq!(servers.dhcp(), Some(true));
+    let iot = vlans.iter().find(|v| v.vlan == Some(1066)).unwrap();
+    assert_eq!(iot.dhcp(), Some(false));
+}
+
+#[tokio::test]
+async fn test_omitted_site_reaches_upstream_as_none() {
+    common::test_setup();
+
+    // A client that records what `site` argument it actually received.
+    let last_site: Arc<tokio::sync::Mutex<Option<Option<String>>>> =
+        Arc::new(tokio::sync::Mutex::new(None));
+    let client_site = last_site.clone();
+    let app: PdmApplication = common::TestApplication::new()
+        .with_omada_client(move || {
+            Arc::new(SiteRecordingClient {
+                site: client_site.clone(),
+            })
+        })
+        .make_pdm_application()
+        .unwrap();
+
+    // The upstream call is memoized per site in a process-wide memo shared
+    // with the parallel tests; clear before and after so they see their own
+    // clients, not this one's canned response.
+    server::api::omada::flush_memo().await;
+
+    // An omitted site must reach the client as `None` (triggering the
+    // client's default-site resolution), not `Some("")`.
+    let vlans = server::api::omada::list_vlans(None, &mut common::rpcenv(), app.clone())
+        .await
+        .unwrap();
+    assert!(!vlans.is_empty());
+    assert_eq!(
+        *last_site.lock().await,
+        Some(None),
+        "omitted site must be None upstream"
+    );
+
+    // An explicit site is passed through verbatim.
+    let sites = server::api::omada::list_vlans(Some("default".into()), &mut common::rpcenv(), app)
+        .await
+        .unwrap();
+    assert!(!sites.is_empty());
+    assert_eq!(*last_site.lock().await, Some(Some("default".into())));
+
+    server::api::omada::flush_memo().await;
+}
+
+/// Omada client recording the `site` argument of the last call.
+struct SiteRecordingClient {
+    site: Arc<tokio::sync::Mutex<Option<Option<String>>>>,
+}
+
+#[async_trait::async_trait]
+impl OmadaApiClient for SiteRecordingClient {
+    async fn vlans(&self, site: Option<&str>) -> Result<Vec<OmadaVlan>, anyhow::Error> {
+        *self.site.lock().await = Some(site.map(|s| s.to_string()));
+        Ok(vec![OmadaVlan::default()])
+    }
+
+    async fn devices(&self, _site: Option<&str>) -> Result<Vec<OmadaDevice>, anyhow::Error> {
+        Ok(vec![])
+    }
+
+    async fn switch_ports(
+        &self,
+        _site: Option<&str>,
+        _mac: &str,
+    ) -> Result<Vec<OmadaPort>, anyhow::Error> {
+        Ok(vec![])
+    }
+
+    async fn clients(&self, _site: Option<&str>) -> Result<Vec<OmadaClient>, anyhow::Error> {
+        Ok(vec![])
+    }
 }
 
 #[tokio::test]

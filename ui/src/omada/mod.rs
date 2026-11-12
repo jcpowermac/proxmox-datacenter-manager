@@ -30,9 +30,10 @@ use pdm_api_types::omada::{
     OmadaClient, OmadaClientEntry, OmadaConfigView, OmadaDevice, OmadaDevicesView, OmadaVlan,
     PveMatch,
 };
+use proxmox_client::ApiResponseData;
 use proxmox_yew_comp::{
     EditWindow, LoadableComponent, LoadableComponentContext, LoadableComponentMaster,
-    LoadableComponentScopeExt, LoadableComponentState, http_get, http_put,
+    LoadableComponentScopeExt, LoadableComponentState, http_get, http_get_full, http_put,
 };
 
 /// A switch port row: one per port of one switch, with the client (if any)
@@ -397,6 +398,15 @@ impl LoadableComponent for OmadaViewComp {
                         .opacity(80)
                         .with_child(tr!("No Omada controller configured yet.")),
                 )
+                .with_child(
+                    Container::new()
+                        .padding_top(4)
+                        .with_child(
+                            Button::new(tr!("Configure"))
+                                .class("pwt-scheme-primary")
+                                .on_activate(ctx.link().change_view_callback(|_| Some(ViewState::Config))),
+                        ),
+                )
                 .into(),
         };
 
@@ -416,6 +426,10 @@ impl LoadableComponent for OmadaViewComp {
             EditWindow::new(tr!("Omada Controller"))
                 .width(600)
                 .submit_text(tr!("Save"))
+                // Prefill the known values and send the config digest back so
+                // the server's lost-update check works.
+                .loader((load_omada_config, "/omada/config".to_string()))
+                .submit_digest(true)
                 .renderer(config_input_panel)
                 .on_submit(|form_ctx: FormContext| async move {
                     let data = form_ctx.get_submit_data();
@@ -426,6 +440,12 @@ impl LoadableComponent for OmadaViewComp {
                 .into(),
         )
     }
+}
+
+/// EditWindow form loader for the Omada config (prefills url / client id /
+/// omadacId and provides the digest).
+async fn load_omada_config(url: yew::AttrValue) -> Result<ApiResponseData<serde_json::Value>, Error> {
+    http_get_full(&*url, None).await
 }
 
 fn config_input_panel(_form_ctx: &FormContext) -> Html {
@@ -534,7 +554,7 @@ fn vlan_columns(client_count: Rc<HashMap<u32, usize>>) -> Rc<Vec<DataTableHeader
             .into(),
         DataTableColumn::new(tr!("DHCP"))
             .width("80px")
-            .render(|vlan: &OmadaVlan| match vlan.dhcp {
+            .render(|vlan: &OmadaVlan| match vlan.dhcp() {
                 Some(true) => tr!("yes").into(),
                 Some(false) => tr!("no").into(),
                 None => "—".into(),

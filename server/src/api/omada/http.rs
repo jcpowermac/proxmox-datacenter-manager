@@ -231,7 +231,7 @@ impl OmadaHttpClient {
                     "{}/openapi/authorize/token?grant_type=client_credentials",
                     self.base
                 ),
-                &[],
+                &[("Content-Type", "application/json")],
                 Some(&body),
             )
             .await?;
@@ -247,7 +247,24 @@ impl OmadaHttpClient {
         let token = inner
             .get("accessToken")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| Error::msg("token response has no accessToken"))?;
+            .ok_or_else(|| {
+                // surface the controller's error (e.g. -44116 bad credentials)
+                // instead of a generic "no accessToken" message
+                match value
+                    .get("errorCode")
+                    .and_then(|e| e.as_i64())
+                    .filter(|e| *e != 0)
+                {
+                    Some(code) => Error::msg(format!(
+                        "Omada authorize failed with errorCode {code}: {}",
+                        value
+                            .get("msg")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("(no message)")
+                    )),
+                    None => Error::msg("token response has no accessToken"),
+                }
+            })?;
         let expires_in: u64 = inner
             .get("expiresIn")
             .and_then(|v| v.as_u64())
@@ -346,6 +363,11 @@ impl OmadaHttpClient {
             let page_len = result.items.len();
             collected.extend(result.items);
             if page_len == 0 || collected.len() >= total_rows || collected.len() >= MAX_ITEMS {
+                if collected.len() >= MAX_ITEMS && collected.len() < total_rows {
+                    log::warn!(
+                        "Omada list {path} truncated at {MAX_ITEMS} items (totalRows {total_rows})"
+                    );
+                }
                 break;
             }
             page += 1;
