@@ -201,13 +201,18 @@ impl LoadableComponent for OmadaViewComp {
             ports: Store::with_extract_key(|row: &PortRow| {
                 Key::from(format!("{}:{}", row.switch_mac, row.port_index))
             }),
+            // The controller has no stable client id; mac (unique per
+            // hardware) is the best key, falling back to ip/hostname/name.
             clients: Store::with_extract_key(|entry: &OmadaClientEntry| {
                 Key::from(
                     entry
                         .client
-                        .ip
+                        .mac
                         .clone()
-                        .unwrap_or_else(|| entry.client.mac.clone().unwrap_or_default()),
+                        .or_else(|| entry.client.ip.clone())
+                        .or_else(|| entry.client.hostname.clone())
+                        .or_else(|| entry.client.name.clone())
+                        .unwrap_or_default(),
                 )
             }),
             devices: Store::with_extract_key(|device: &OmadaDevice| {

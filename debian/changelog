@@ -9,7 +9,9 @@ proxmox-datacenter-manager (1.1.9+omada1) local; urgency=medium
   * fork: build on aarch64 by using c_char in the hand-rolled libfido2
     bindings (mixed *const i8/*const u8 assumed amd64 signed char).
 
-  * fork: build the UI as a web crate (wasm-pack) with a [lib] crate-type.
+  * fork: build the UI wasm from the bin crate (wasm-bindgen + wasm-opt +
+    esbuild; index.html inits from the inlined bundle instead of fetching a
+    decompressed wasm).
 
  -- Proxmox Datacenter Manager fork <omada@local>  Thu, 12 Nov 2026 00:00:00 +0000
 

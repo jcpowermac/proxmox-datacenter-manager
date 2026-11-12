@@ -692,7 +692,8 @@ impl FidoDev {
         let extensions = (self.lib.fido_cbor_info_extensions_ptr)(info.info);
         if !extensions.is_null() {
             let len = (self.lib.fido_cbor_info_extensions_len)(info.info);
-            let extensions = unsafe { std::slice::from_raw_parts(extensions as *const &c_char, len) };
+            let extensions =
+                unsafe { std::slice::from_raw_parts(extensions as *const &c_char, len) };
             for ext in extensions {
                 let name = unsafe { CStr::from_ptr(*ext) };
                 if name.to_bytes() == b"hmac-secret" {

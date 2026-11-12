@@ -116,7 +116,9 @@ Probed against the live controller (v6.3.0.111) on 2026-11-11:
   number for wired), `switchMac` + `switchName` (present on wired clients
   connected to Omada-managed switches; verified live: 24 of 29 wired lab
   clients carry it, e.g. pve2 → `28-87-BA-61-24-DE`; wired clients without
-  it sit on the ER7206 gateway's own ports), `connectType` (2 = wired),
+  it sit on the ER7206 gateway's own ports), `connectType` (1 = wired /
+  switch, 2 = wireless/AP per the captured fixtures; the code keys off
+  `switchMac`/`apName` rather than this field),
   `networkName`, `apName`, `blocked`, `active`, `lastSeen`.
 - PVE-node join: PVE management IPs appear as clients (verified `.97`, `.98`,
   `.99` are all present with port/vid). **But `remotes.cfg` may not hold
