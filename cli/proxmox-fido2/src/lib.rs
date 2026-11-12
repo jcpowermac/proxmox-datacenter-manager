@@ -1,5 +1,5 @@
 use std::error::Error as StdError;
-use std::ffi::{CStr, CString, OsStr, c_int, c_void};
+use std::ffi::{CStr, CString, OsStr, c_char, c_int, c_void};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -92,50 +92,50 @@ impl Dl {
 pub struct Lib {
     _lib: Dl,
     fido_init: extern "C" fn(c_int),
-    fido_strerr: extern "C" fn(c_int) -> *const i8,
+    fido_strerr: extern "C" fn(c_int) -> *const c_char,
 
     fido_dev_new: extern "C" fn() -> *mut c_void,
     fido_dev_free: extern "C" fn(&mut *mut c_void),
-    fido_dev_open: extern "C" fn(*mut c_void, dev: *const i8) -> c_int,
+    fido_dev_open: extern "C" fn(*mut c_void, dev: *const c_char) -> c_int,
     fido_dev_close: extern "C" fn(*mut c_void),
     fido_dev_cancel: extern "C" fn(*mut c_void),
     fido_dev_is_fido2: extern "C" fn(*mut c_void) -> c_int,
     fido_dev_get_cbor_info: extern "C" fn(*mut c_void, *mut c_void) -> c_int,
-    fido_dev_make_cred: extern "C" fn(*mut c_void, *mut c_void, *const i8) -> c_int,
-    fido_dev_get_assert: extern "C" fn(*mut c_void, *mut c_void, *const i8) -> c_int,
+    fido_dev_make_cred: extern "C" fn(*mut c_void, *mut c_void, *const c_char) -> c_int,
+    fido_dev_get_assert: extern "C" fn(*mut c_void, *mut c_void, *const c_char) -> c_int,
 
     fido_dev_info_new: extern "C" fn(libc::size_t) -> *mut c_void,
     fido_dev_info_free: extern "C" fn(&mut *mut c_void, libc::size_t),
     fido_dev_info_manifest: extern "C" fn(*mut c_void, libc::size_t, *mut libc::size_t) -> c_int,
     fido_dev_info_ptr: extern "C" fn(*mut c_void, libc::size_t) -> *mut c_void,
-    fido_dev_info_manufacturer_string: extern "C" fn(*mut c_void) -> *const i8,
-    fido_dev_info_path: extern "C" fn(*mut c_void) -> *const i8,
-    fido_dev_info_product_string: extern "C" fn(*mut c_void) -> *const i8,
+    fido_dev_info_manufacturer_string: extern "C" fn(*mut c_void) -> *const c_char,
+    fido_dev_info_path: extern "C" fn(*mut c_void) -> *const c_char,
+    fido_dev_info_product_string: extern "C" fn(*mut c_void) -> *const c_char,
     fido_dev_get_touch_begin: extern "C" fn(*mut c_void) -> c_int,
     fido_dev_get_touch_status: extern "C" fn(*mut c_void, *mut c_int, c_int) -> c_int,
 
     fido_cbor_info_new: extern "C" fn() -> *mut c_void,
     fido_cbor_info_free: extern "C" fn(&mut *mut c_void),
-    fido_cbor_info_extensions_ptr: extern "C" fn(*mut c_void) -> *const *const i8,
+    fido_cbor_info_extensions_ptr: extern "C" fn(*mut c_void) -> *const *const c_char,
     fido_cbor_info_extensions_len: extern "C" fn(*mut c_void) -> libc::size_t,
-    fido_cbor_info_options_name_ptr: extern "C" fn(*mut c_void) -> *const *const i8,
-    fido_cbor_info_options_value_ptr: extern "C" fn(*mut c_void) -> *const i8,
+    fido_cbor_info_options_name_ptr: extern "C" fn(*mut c_void) -> *const *const c_char,
+    fido_cbor_info_options_value_ptr: extern "C" fn(*mut c_void) -> *const c_char,
     fido_cbor_info_options_len: extern "C" fn(*mut c_void) -> libc::size_t,
 
     fido_cred_new: extern "C" fn() -> *mut c_void,
     fido_cred_free: extern "C" fn(&mut *mut c_void),
     fido_cred_exclude: extern "C" fn(*mut c_void, *const u8, libc::size_t) -> c_int,
     fido_cred_set_extensions: extern "C" fn(*mut c_void, c_int) -> c_int,
-    fido_cred_set_rp: extern "C" fn(*mut c_void, *const i8, *const i8) -> c_int,
-    fido_cred_set_fmt: extern "C" fn(*mut c_void, *const i8) -> c_int,
+    fido_cred_set_rp: extern "C" fn(*mut c_void, *const c_char, *const c_char) -> c_int,
+    fido_cred_set_fmt: extern "C" fn(*mut c_void, *const c_char) -> c_int,
     fido_cred_set_type: extern "C" fn(*mut c_void, c_int) -> c_int,
     fido_cred_set_user: extern "C" fn(
         *mut c_void,
         *const u8,
         libc::size_t,
-        *const i8,
-        *const i8,
-        *const i8,
+        *const c_char,
+        *const c_char,
+        *const c_char,
     ) -> c_int,
     fido_cred_set_clientdata_hash: extern "C" fn(*mut c_void, *const u8, libc::size_t) -> c_int,
     fido_cred_set_rk: extern "C" fn(*mut c_void, FidoOpt) -> c_int,
@@ -154,7 +154,7 @@ pub struct Lib {
     fido_assert_free: extern "C" fn(&mut *mut c_void),
     fido_assert_set_extensions: extern "C" fn(*mut c_void, c_int) -> c_int,
     fido_assert_set_hmac_salt: extern "C" fn(*mut c_void, *const u8, libc::size_t) -> c_int,
-    fido_assert_set_rp: extern "C" fn(*mut c_void, *const i8) -> c_int,
+    fido_assert_set_rp: extern "C" fn(*mut c_void, *const c_char) -> c_int,
     fido_assert_set_clientdata_hash: extern "C" fn(*mut c_void, *const u8, libc::size_t) -> c_int,
     fido_assert_allow_cred: extern "C" fn(*mut c_void, *const u8, libc::size_t) -> c_int,
     fido_assert_set_up: extern "C" fn(*mut c_void, FidoOpt) -> c_int,
@@ -692,7 +692,7 @@ impl FidoDev {
         let extensions = (self.lib.fido_cbor_info_extensions_ptr)(info.info);
         if !extensions.is_null() {
             let len = (self.lib.fido_cbor_info_extensions_len)(info.info);
-            let extensions = unsafe { std::slice::from_raw_parts(extensions as *const &i8, len) };
+            let extensions = unsafe { std::slice::from_raw_parts(extensions as *const &c_char, len) };
             for ext in extensions {
                 let name = unsafe { CStr::from_ptr(*ext) };
                 if name.to_bytes() == b"hmac-secret" {
@@ -712,7 +712,7 @@ impl FidoDev {
             let len = (self.lib.fido_cbor_info_options_len)(info.info);
 
             let option_names =
-                unsafe { std::slice::from_raw_parts(option_names as *const &i8, len) };
+                unsafe { std::slice::from_raw_parts(option_names as *const &c_char, len) };
             let option_values = unsafe { std::slice::from_raw_parts(option_values, len) };
 
             for (name, value) in std::iter::zip(option_names, option_values) {

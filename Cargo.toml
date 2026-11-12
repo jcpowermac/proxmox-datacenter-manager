@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.1.9"
+version = "1.1.9+omada1"
 authors = [
     "Thomas Lamprecht <t.lamprecht@proxmox.com>",
     "Proxmox Support Team <support@proxmox.com>",
@@ -68,8 +68,8 @@ proxmox-tfa = { version = "6", features = [ "api-types" ], default-features = fa
 proxmox-time = "2"
 proxmox-upgrade-checks = "1.1.1"
 proxmox-uuid = "1"
-proxmox-installer-types = "0.3.1"
-proxmox-network-types = "1.2.1"
+proxmox-installer-types = "0.3.0" # local-dev: proxmox-rs mirror lag
+proxmox-network-types = "1.2.0" # local-dev: proxmox-rs mirror lag
 
 # other proxmox crates
 proxmox-acme = "1.0"

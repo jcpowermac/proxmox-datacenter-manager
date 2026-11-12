@@ -1,3 +1,18 @@
+proxmox-datacenter-manager (1.1.9+omada1) local; urgency=medium
+
+  * fork: add a read-only Omada section showing VLANs, switch ports,
+    connected clients and managed devices of a TP-Link Omada controller,
+    joined with PVE remotes so clients on PDM-managed Proxmox nodes are
+    marked with their remote/node. Configuration (controller URL, client
+    id, write-only secret) is stored in the PDM configuration.
+
+  * fork: build on aarch64 by using c_char in the hand-rolled libfido2
+    bindings (mixed *const i8/*const u8 assumed amd64 signed char).
+
+  * fork: build the UI as a web crate (wasm-pack) with a [lib] crate-type.
+
+ -- Proxmox Datacenter Manager fork <omada@local>  Thu, 12 Nov 2026 00:00:00 +0000
+
 proxmox-datacenter-manager (1.1.9) trixie; urgency=medium
 
   * resources: include the HA state of Proxmox VE nodes, which the web
