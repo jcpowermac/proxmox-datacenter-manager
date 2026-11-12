@@ -19,8 +19,9 @@ use pdm_api_types::omada::{
 use pdm_api_types::{PRIV_SYS_AUDIT, PRIV_SYS_MODIFY};
 use pdm_config::omada::OmadaRemote;
 use proxmox_config_digest::ConfigDigest;
-use proxmox_router::{Permission, Router, RpcEnvironment};
+use proxmox_router::{Permission, Router, RpcEnvironment, SubdirMap, list_subdirs_api_method};
 use proxmox_schema::api;
+use proxmox_sortable_macro::sortable;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -150,7 +151,11 @@ pub async fn list_vlans(
         client.vlans(upstream).await
     })
     .await
-    .with_context(|| format!("failed to list Omada VLANs for site '{site}'"))
+    .map_err(|e| {
+        Error::msg(format!(
+            "failed to list Omada VLANs for site '{site}': {e:#}"
+        ))
+    })
 }
 
 #[api(
@@ -386,18 +391,46 @@ pub fn update_config(
     Ok(true)
 }
 
+#[sortable]
+const SUBDIRS: SubdirMap = &sorted!([
+    ("clients", &Router::new().get(&API_METHOD_LIST_CLIENTS)),
+    ("config", &Router::new().get(&API_METHOD_GET_CONFIG).put(&API_METHOD_UPDATE_CONFIG)),
+    ("devices", &Router::new().get(&API_METHOD_LIST_DEVICES)),
+    ("vlans", &Router::new().get(&API_METHOD_LIST_VLANS)),
+]);
+
 pub const ROUTER: Router = Router::new()
-    .get(&API_METHOD_LIST_VLANS)
-    .get(&API_METHOD_LIST_DEVICES)
-    .get(&API_METHOD_LIST_CLIENTS)
-    .get(&API_METHOD_GET_CONFIG)
-    .put(&API_METHOD_UPDATE_CONFIG);
+    .get(&list_subdirs_api_method!(SUBDIRS))
+    .subdirs(SUBDIRS);
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::atomic::AtomicUsize;
 
     use super::*;
+
+    /// Regression: the previous flat `Router::new().get(..).get(..)` chain
+    /// overwrote the single GET slot, so only `config` resolved and
+    /// `vlans`/`devices`/`clients` 404'd at runtime even though the
+    /// function-level tests passed.
+    #[test]
+    fn router_resolves_all_endpoints() {
+        let mut params = HashMap::new();
+        for (path, method) in [
+            ("vlans", ::http::Method::GET),
+            ("devices", ::http::Method::GET),
+            ("clients", ::http::Method::GET),
+            ("config", ::http::Method::GET),
+            ("config", ::http::Method::PUT),
+        ] {
+            let components: Vec<&str> = path.split('/').collect();
+            assert!(
+                ROUTER.find_method(&components, method.clone(), &mut params).is_some(),
+                "router should resolve {method} /omada/{path}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn memo_returns_cached_value_within_ttl() {

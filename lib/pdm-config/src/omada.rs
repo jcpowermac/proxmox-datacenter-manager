@@ -231,10 +231,13 @@ pub fn save(remote: &OmadaRemote) -> Result<(), Error> {
 
     let (cfg, shadow) = render_cfg(remote)?;
 
-    // write out shadow config *only before* the cfg, same ordering as remotes
+    // write out shadow config *only before* the cfg, same ordering as remotes.
+    // Use `replace_config` (api_user-owned) rather than `replace_secret_config`
+    // (priv_user-owned): the API daemon runs as the api user without CAP_CHOWN, so
+    // chowning the shadow to the priv user would EPERM. This matches `remotes`.
     match shadow {
         Some(shadow) => {
-            proxmox_product_config::replace_secret_config(OMADA_SHADOW_FILENAME, shadow.as_bytes())?
+            proxmox_product_config::replace_config(OMADA_SHADOW_FILENAME, shadow.as_bytes())?
         }
         None => {
             let _ = std::fs::remove_file(OMADA_SHADOW_FILENAME); // no secret -> no shadow

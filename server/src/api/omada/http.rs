@@ -129,14 +129,15 @@ impl OmadaTransport for ProxmoxTransport {
     }
 }
 
-/// Envelope for list endpoints: `result.items` + `result.totalRows`.
+/// Envelope for list endpoints: `result.data` (Omada 6.x; older builds used
+/// `items`) + `result.totalRows`.
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OmadaResult<T> {
     #[serde(default)]
     total_rows: u32,
-    #[serde(default)]
-    items: Vec<T>,
+    #[serde(default, rename = "data", alias = "items")]
+    data: Vec<T>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -301,7 +302,7 @@ impl OmadaHttpClient {
         check_error_code(env.error_code, env.msg.as_deref())?;
         let id = env
             .result
-            .and_then(|r| r.items.into_iter().next())
+            .and_then(|r| r.data.into_iter().next())
             .and_then(|s| s.id)
             .ok_or_else(|| Error::msg("controller has no sites"))?;
         *guard = Some(id.clone());
@@ -360,8 +361,8 @@ impl OmadaHttpClient {
                 .result
                 .ok_or_else(|| Error::msg(format!("{path} response has no result")))?;
             let total_rows = result.total_rows as usize;
-            let page_len = result.items.len();
-            collected.extend(result.items);
+            let page_len = result.data.len();
+            collected.extend(result.data);
             if page_len == 0 || collected.len() >= total_rows || collected.len() >= MAX_ITEMS {
                 if collected.len() >= MAX_ITEMS && collected.len() < total_rows {
                     log::warn!(
@@ -558,8 +559,9 @@ mod tests {
     const AUTH_RESPONSE: &str =
         r#"{"errorCode":0,"msg":"success","result":{"accessToken":"tok2","expiresIn":7200}}"#;
     const EMPTY_PAGE: &str =
-        r#"{"errorCode":0,"msg":"success","result":{"totalRows":0,"items":[]}}"#;
+        r#"{"errorCode":0,"msg":"success","result":{"totalRows":0,"data":[]}}"#;
 
+    /// Real Omada 6.x shape: the list is `result.data`.
     fn list_page(total_rows: u32, count: u32) -> String {
         let items: Vec<_> = (0..count)
             .map(|i| json!({ "id": format!("id-{i}"), "vlan": i + 1 }))
@@ -567,9 +569,24 @@ mod tests {
         json!({
             "errorCode": 0,
             "msg": "success",
-            "result": { "totalRows": total_rows, "items": items },
+            "result": { "totalRows": total_rows, "data": items },
         })
         .to_string()
+    }
+
+    /// Older controllers put the list under `result.items`; the alias must
+    /// keep working.
+    #[test]
+    fn list_envelope_accepts_items_alias() {
+        let body = json!({
+            "errorCode": 0,
+            "msg": "success",
+            "result": { "totalRows": 1, "items": [json!({"id":"x","vlan":1})] },
+        })
+        .to_string();
+        let env: OmadaEnvelope<pdm_api_types::omada::OmadaVlan> =
+            serde_json::from_str(&body).unwrap();
+        assert_eq!(env.result.unwrap().data.len(), 1);
     }
 
     #[test]

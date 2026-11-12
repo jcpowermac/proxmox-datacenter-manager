@@ -27,7 +27,8 @@ pub trait OmadaApiClient: Send + Sync {
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OmadaSite {
-    #[serde(default)]
+    /// Wire key is `siteId` (list items); accept `id` too for drift.
+    #[serde(default, rename = "siteId", alias = "id")]
     pub id: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
@@ -44,7 +45,7 @@ pub struct OmadaVlan {
     pub vlan: Option<u32>,
     #[serde(default)]
     pub gateway_subnet: Option<String>,
-    /// Nested wire shape: `dhcpSettingsVO: {dhcp: bool}`.
+    /// Nested wire shape: `dhcpSettingsVO: {enable: bool, ...}`.
     #[serde(default, rename = "dhcpSettingsVO")]
     pub dhcp_settings: Option<OmadaDhcpSettings>,
 }
@@ -52,7 +53,8 @@ pub struct OmadaVlan {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OmadaDhcpSettings {
-    #[serde(default)]
+    /// Wire key is `enable` (Omada 6.x); accept `dhcp` for drift.
+    #[serde(default, rename = "enable", alias = "dhcp")]
     pub dhcp: Option<bool>,
 }
 
@@ -61,6 +63,21 @@ impl OmadaVlan {
     pub fn dhcp(&self) -> Option<bool> {
         self.dhcp_settings.and_then(|d| d.dhcp)
     }
+}
+
+/// `poeMode` is a string on some firmware revisions ("auto"/"off"/"on") and an
+/// integer on others (0/1/2). Accept both and store a display string so a
+/// single field never fails the whole port list parse.
+fn de_poe_mode<'de, D>(d: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(match v {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(s) => Some(s),
+        other => Some(other.to_string()),
+    })
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
@@ -74,7 +91,7 @@ pub struct OmadaPort {
     pub profile_id: Option<String>,
     #[serde(default)]
     pub profile_name: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_poe_mode")]
     pub poe_mode: Option<String>,
     #[serde(default)]
     pub lag_port: Option<bool>,
@@ -96,7 +113,8 @@ pub struct OmadaDevice {
     pub ip: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
-    #[serde(default)]
+    /// Wire key is `firmwareVersion` (Omada 6.x); accept `firmware` for drift.
+    #[serde(default, rename = "firmwareVersion", alias = "firmware")]
     pub firmware: Option<String>,
     #[serde(default)]
     pub status: Option<i32>,
@@ -195,9 +213,11 @@ mod tests {
 
     #[test]
     fn vlan_parses_probe_shape_and_ignores_unknowns() {
+        // Real Omada 6.x shape: `dhcpSettingsVO.enable`.
         let v: OmadaVlan = serde_json::from_str(
             r#"{"id":"17","name":"servers","vlan":12,"vlanType":0,
-                "gatewaySubnet":"172.31.12.0/24","dhcpSettingsVO":{"dhcp":true}}"#,
+                "gatewaySubnet":"172.31.12.0/24",
+                "dhcpSettingsVO":{"enable":true,"ipaddrStart":"172.31.12.100"}}"#,
         )
         .unwrap();
         assert_eq!(v.vlan, Some(12));
@@ -205,6 +225,7 @@ mod tests {
         assert_eq!(v.gateway_subnet.as_deref(), Some("172.31.12.0/24"));
         assert_eq!(v.dhcp(), Some(true));
 
+        // Older / synthetic shape: `dhcpSettingsVO.dhcp` (alias).
         let off: OmadaVlan =
             serde_json::from_str(r#"{"vlan":1066,"name":"iot","dhcpSettingsVO":{"dhcp":false}}"#)
                 .unwrap();
@@ -212,6 +233,23 @@ mod tests {
 
         let missing: OmadaVlan = serde_json::from_str(r#"{"vlan":5}"#).unwrap();
         assert_eq!(missing.dhcp(), None);
+    }
+
+    #[test]
+    fn site_and_device_parse_real_keys() {
+        // Sites list items carry `siteId`, not `id`.
+        let s: OmadaSite =
+            serde_json::from_str(r#"{"siteId":"abc123","name":"home"}"#).unwrap();
+        assert_eq!(s.id.as_deref(), Some("abc123"));
+
+        // Devices carry `firmwareVersion`, not `firmware`.
+        let d: OmadaDevice = serde_json::from_str(
+            r#"{"mac":"AA-BB","name":"sw","type":"switch","ip":"1.2.3.4",
+                "firmwareVersion":"1.0.2","status":1}"#,
+        )
+        .unwrap();
+        assert_eq!(d.firmware.as_deref(), Some("1.0.2"));
+        assert_eq!(d.device_type.as_deref(), Some("switch"));
     }
 
     #[test]
@@ -245,5 +283,24 @@ mod tests {
         .unwrap();
         assert_eq!(d.device_type.as_deref(), Some("switch"));
         assert_eq!(d.port_list.as_ref().unwrap()[0].port, Some(17));
+    }
+
+    #[test]
+    fn port_parses_integer_and_string_poe_mode() {
+        // Real Omada 6.x: poeMode is an integer.
+        let int: OmadaPort = serde_json::from_str(
+            r#"{"port":1,"name":"Port1","profileId":"p1","profileName":"All",
+                "poeMode":1,"lagPort":false,"status":1}"#,
+        )
+        .unwrap();
+        assert_eq!(int.poe_mode.as_deref(), Some("1"));
+
+        // Older / string firmware revision.
+        let str: OmadaPort =
+            serde_json::from_str(r#"{"port":17,"poeMode":"auto"}"#).unwrap();
+        assert_eq!(str.poe_mode.as_deref(), Some("auto"));
+
+        let absent: OmadaPort = serde_json::from_str(r#"{"port":2}"#).unwrap();
+        assert_eq!(absent.poe_mode, None);
     }
 }

@@ -243,6 +243,9 @@ impl LoadableComponent for OmadaViewComp {
     fn update(&mut self, ctx: &LoadableComponentContext<Self>, msg: Self::Message) -> bool {
         match msg {
             Msg::Reload => {
+                // Close any open dialog (the config EditWindow's on_done /
+                // close button routes here) before re-fetching.
+                ctx.link().change_view(None);
                 self.reload(ctx);
                 true
             }
